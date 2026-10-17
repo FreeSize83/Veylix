@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -399,6 +399,26 @@ namespace Veylix.Tests
             Eq("all", e2.GameMode, "игровой фильтр сохранён в файле");
             e.SetGameMode("disabled");
             Check(!e.BuildArgs(list[0]).Contains("1024-65535"), "игровой фильтр выключается");
+
+            // IPSet: прямой выбор режима, список не теряется при переходах
+            string ipset = Path.Combine(e.Lists, "ipset-all.txt");
+            string ipsetSaved = File.Exists(ipset) ? File.ReadAllText(ipset) : null;
+            File.WriteAllText(ipset, "1.2.3.0/24" + Environment.NewLine);
+            if (File.Exists(ipset + ".backup")) File.Delete(ipset + ".backup");
+            Eq("loaded", e.GetIpsetMode(), "IPSet: список загружен");
+            Eq(null, e.SetIpsetMode("any"), "IPSet → Все IP");
+            Eq("any", e.GetIpsetMode(), "IPSet: режим Все IP");
+            Check(e.HasIpsetList, "IPSet: список сохранён в резервной копии");
+            Eq(null, e.SetIpsetMode("none"), "IPSet → Выкл");
+            Eq("none", e.GetIpsetMode(), "IPSet: режим Выкл");
+            Eq(null, e.SetIpsetMode("loaded"), "IPSet → Список");
+            Eq("1.2.3.0/24" + Environment.NewLine, File.ReadAllText(ipset), "IPSet: возвращён тот же список");
+            Eq(null, e.SetIpsetMode("loaded"), "IPSet: тот же режим — без изменений");
+            Eq(null, e.SetIpsetMode("none"), "IPSet → Выкл из списка");
+            File.Delete(ipset + ".backup");
+            Check(!e.HasIpsetList, "IPSet: без резервной копии списка нет");
+            Check(e.SetIpsetMode("loaded") != null, "IPSet: «Список» без копии — понятная ошибка");
+            if (ipsetSaved != null) File.WriteAllText(ipset, ipsetSaved); else File.Delete(ipset);
 
             // пользовательские списки переживают повторную распаковку
             e.EnsureUserLists();

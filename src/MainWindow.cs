@@ -540,6 +540,34 @@ namespace Veylix
             catch (Exception ex) { busy = false; log.Add("err", ex.Message); RefreshUi(); }
         }
 
+        // Выбор режима из плашки на главной: сразу нужный режим, без перебора по кругу
+        async void OnSetIpset(string mode)
+        {
+            try
+            {
+                if (busy || tuning || updating || mode == engine.GetIpsetMode()) return;
+                string err = engine.SetIpsetMode(mode);
+                if (err != null) { log.Add("err", err); return; }
+                log.Add("info", "IPSet: " + IpsetLabel(engine.GetIpsetMode()));
+                RefreshUi();
+                await RestartIfRunning();
+            }
+            catch (Exception ex) { busy = false; log.Add("err", ex.Message); RefreshUi(); }
+        }
+
+        async void OnSetGame(string mode)
+        {
+            try
+            {
+                if (busy || tuning || updating || mode == engine.GameMode) return;
+                engine.SetGameMode(mode);
+                log.Add("info", "Игровой фильтр: " + GameLabel(engine.GameMode));
+                RefreshUi();
+                await RestartIfRunning();
+            }
+            catch (Exception ex) { busy = false; log.Add("err", ex.Message); RefreshUi(); }
+        }
+
         async void OnUpdateIpset()
         {
             try

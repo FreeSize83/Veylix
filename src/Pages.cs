@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Windows;
@@ -147,7 +147,7 @@ namespace Veylix
             layout.Children.Add(content);
             root.Children.Add(layout);
             root.Children.Add(BuildToasts());
-            root.Children.Add(BuildStrategyPicker());
+            root.Children.Add(BuildTilePicker());
             root.Children.Add(BuildPalette());
 
             ShowPage("home");
@@ -489,10 +489,10 @@ namespace Veylix
             for (int i = 0; i < 7; i++) tiles.ColumnDefinitions.Add(Theme.Col(i % 2 == 1 ? 12 : 0));
             VButton t1 = Tile(1, 0xE8FD, "Стратегия", "Выбрать стратегию из списка. Подробные результаты — на странице «Стратегии».", out tileStrat);
             t1.Click += delegate { OpenStrategyPicker(t1); };
-            VButton t2 = Tile(2, 0xE774, "IPSet", "Выкл → Все IP → Список. Как в service.bat.", out tileIpset);
-            t2.Click += delegate { OnIpset(); };
-            VButton t3 = Tile(3, 0xE7FC, "Игровой фильтр", "Выкл → TCP+UDP → TCP → UDP. Порты 1024–65535 для игр.", out tileGame);
-            t3.Click += delegate { OnGame(); };
+            VButton t2 = Tile(2, 0xE774, "IPSet", "Выбрать режим IPSet: Выкл, Все IP или Список. Как в service.bat.", out tileIpset);
+            t2.Click += delegate { OpenIpsetPicker(t2); };
+            VButton t3 = Tile(3, 0xE7FC, "Игровой фильтр", "Выбрать режим: Выкл, TCP+UDP, TCP или UDP. Порты 1024–65535 для игр.", out tileGame);
+            t3.Click += delegate { OpenGamePicker(t3); };
             VButton t4 = Tile(4, 0xE9F5, "Автоподбор", "Проверить стратегии и выбрать лучшую.", out tileTune);
             tileTune.Text = "Запустить";
             t4.Click += delegate { ShowPage("strategies"); if (!tuning) OnTune(); };

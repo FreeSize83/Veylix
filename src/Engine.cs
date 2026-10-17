@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -641,6 +641,41 @@ namespace Veylix
                     if (File.Exists(list)) File.Delete(list);
                     File.Move(backup, list);
                 }
+                return null;
+            }
+            catch (Exception ex) { return ex.Message; }
+        }
+
+        // Есть ли сохранённый список, к которому можно вернуться в режиме «Список»
+        public bool HasIpsetList
+        {
+            get { return GetIpsetMode() == "loaded" || File.Exists(IpsetFile + ".backup"); }
+        }
+
+        // Сразу нужный режим (none | any | loaded) вместо перебора по кругу. Возвращает текст ошибки или null.
+        // Как и CycleIpset, при уходе из «Списка» сохраняет его в .backup, чтобы к нему можно было вернуться.
+        public string SetIpsetMode(string target)
+        {
+            try
+            {
+                string list = IpsetFile;
+                string backup = list + ".backup";
+                string mode = GetIpsetMode();
+                if (mode == target) return null;
+                if (target == "loaded")
+                {
+                    if (!File.Exists(backup)) return "Нет сохранённого списка IPSet. Сначала скачайте его («Обновить IPSet»).";
+                    if (File.Exists(list)) File.Delete(list);
+                    File.Move(backup, list);
+                    return null;
+                }
+                if (target != "none" && target != "any") return "Неизвестный режим IPSet: " + target;
+                if (mode == "loaded")
+                {
+                    if (File.Exists(backup)) File.Delete(backup);
+                    File.Move(list, backup);
+                }
+                File.WriteAllText(list, target == "none" ? "203.0.113.113/32" + Environment.NewLine : "");
                 return null;
             }
             catch (Exception ex) { return ex.Message; }
