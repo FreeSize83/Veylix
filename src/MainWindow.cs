@@ -40,8 +40,6 @@ namespace Veylix
         Grid design;
         DispatcherTimer timer;
         WF.NotifyIcon tray;
-        WF.ToolStripMenuItem trayPower;
-        TrayColors trayColors;
 
         public MainWindow(bool auto, bool selfTest)
         {
@@ -182,7 +180,7 @@ namespace Veylix
             UpdateBlobs();
             UpdateScenes();
             if (netMap != null) netMap.Restyle();
-            if (trayColors != null) trayColors.Refresh(tray);
+            RefreshFlyout();
             RefreshAppearanceTexts();
         }
 
@@ -213,18 +211,12 @@ namespace Veylix
             try { tray.Icon = SD.Icon.ExtractAssociatedIcon(Assembly.GetExecutingAssembly().Location); }
             catch { tray.Icon = SD.SystemIcons.Application; }
             tray.Text = "Veylix";
-            WF.ContextMenuStrip menu = new WF.ContextMenuStrip();
-            menu.Items.Add("Открыть Veylix", null, delegate(object s, EventArgs e) { ShowFromTray(); });
-            trayPower = new WF.ToolStripMenuItem("Включить обход", null, delegate(object s, EventArgs e) { OnPower(); });
-            menu.Items.Add(trayPower);
-            menu.Items.Add("Проверить доступность", null, delegate(object s, EventArgs e) { RunAccessTest(); });
-            menu.Items.Add(new WF.ToolStripSeparator());
-            menu.Items.Add("Выход", null, delegate(object s, EventArgs e) { ExitApp(); });
-            trayColors = new TrayColors();
-            menu.Renderer = new WF.ToolStripProfessionalRenderer(trayColors);
-            tray.ContextMenuStrip = menu;
-            trayColors.Refresh(tray);
-            tray.DoubleClick += delegate(object s, EventArgs e) { ShowFromTray(); };
+            // вместо стандартного меню — своя панель в стиле приложения (TrayFlyout.cs)
+            tray.MouseClick += delegate(object s, WF.MouseEventArgs e)
+            {
+                if (e.Button == WF.MouseButtons.Left || e.Button == WF.MouseButtons.Right) ToggleFlyout();
+            };
+            tray.DoubleClick += delegate(object s, EventArgs e) { CloseFlyout(); ShowFromTray(); };
             tray.Visible = true;
         }
 
@@ -383,12 +375,11 @@ namespace Veylix
                 {
                     string tt = run ? "Veylix — работает: " + name : "Veylix — обход выключен";
                     tray.Text = tt.Length > 63 ? tt.Substring(0, 63) : tt;
-                    trayPower.Text = run ? "Выключить обход" : "Включить обход";
-                    trayPower.Enabled = !busy && !tuning;
                 }
                 catch { }
             }
             UpdateUptime();
+            RefreshFlyout();
             TrackEngine();
             RefreshMap();
             RefreshActivity();
@@ -1180,6 +1171,29 @@ namespace Veylix
                         if (fam != "purple" && fam != "glass" && fam != "night" && pg != "home" && pg != "settings") continue;
                         ShowPage(pg);
                         Snap(Path.Combine(dir, Theme.Current.Id + "-" + pg + ".png"));
+                        if (pg == "home" && (fam == "purple" || fam == "night" || fam == "cream"))
+                        {
+                            // панель трея отдельно: окно не показывается, рисуем её содержимое на фоне Popup
+                            Border fly = new Border();
+                            fly.Width = FlyoutW;
+                            fly.BorderThickness = new Thickness(1);
+                            fly.SetResourceReference(Border.BackgroundProperty, "Popup");
+                            fly.SetResourceReference(Border.BorderBrushProperty, "StrokeStrong");
+                            design.Children.Add(fly);
+                            fly.HorizontalAlignment = HorizontalAlignment.Left;
+                            fly.VerticalAlignment = VerticalAlignment.Top;
+                            foreach (string view in new string[] { "main", "strategy", "ipset" })
+                            {
+                                flyoutView = view;
+                                fly.Child = BuildFlyoutContent();
+                                design.Measure(new Size(DW, DH));
+                                design.Arrange(new Rect(0, 0, DW, DH));
+                                design.UpdateLayout();
+                                SnapElement(fly, Path.Combine(dir, Theme.Current.Id + "-tray" + (view == "main" ? "" : "-" + view) + ".png"));
+                            }
+                            flyoutView = "main";
+                            design.Children.Remove(fly);
+                        }
                     }
                 }
             }
@@ -1306,51 +1320,4 @@ namespace Veylix
         public TuneAbort(string m) : base(m) { }
     }
 
-    // Цвета контекстного меню трея в духе текущей темы
-    public class TrayColors : WF.ProfessionalColorTable
-    {
-        SD.Color bg = SD.Color.White, hover = SD.Color.Gainsboro, border = SD.Color.Silver, text = SD.Color.Black;
-
-        static SD.Color Conv(Brush b, SD.Color fallback)
-        {
-            SolidColorBrush s = b as SolidColorBrush;
-            if (s == null) return fallback;
-            Color c = s.Color;
-            return SD.Color.FromArgb(255, c.R, c.G, c.B);
-        }
-
-        public void Refresh(WF.NotifyIcon tray)
-        {
-            if (Theme.Current == null) return;
-            bg = Conv(Theme.Res("Popup"), bg);
-            SD.Color accent = Conv(Theme.Res("Accent"), hover);
-            hover = SD.Color.FromArgb(255, (bg.R * 4 + accent.R) / 5, (bg.G * 4 + accent.G) / 5, (bg.B * 4 + accent.B) / 5);
-            border = Conv(Theme.Current.Res.ContainsKey("StrokeStrong") ? (Brush)Theme.Current.Res["StrokeStrong"] : null, border);
-            if (Theme.Current.Glass) border = Theme.Current.Dark ? SD.Color.FromArgb(255, 70, 76, 102) : SD.Color.FromArgb(255, 205, 210, 228);
-            text = Conv(Theme.Res("Text"), text);
-            try
-            {
-                if (tray != null && tray.ContextMenuStrip != null)
-                {
-                    tray.ContextMenuStrip.BackColor = bg;
-                    tray.ContextMenuStrip.ForeColor = text;
-                    foreach (WF.ToolStripItem it in tray.ContextMenuStrip.Items) it.ForeColor = text;
-                    tray.ContextMenuStrip.Invalidate();
-                }
-            }
-            catch { }
-        }
-
-        public override SD.Color ToolStripDropDownBackground { get { return bg; } }
-        public override SD.Color ImageMarginGradientBegin { get { return bg; } }
-        public override SD.Color ImageMarginGradientMiddle { get { return bg; } }
-        public override SD.Color ImageMarginGradientEnd { get { return bg; } }
-        public override SD.Color MenuBorder { get { return border; } }
-        public override SD.Color MenuItemBorder { get { return hover; } }
-        public override SD.Color MenuItemSelected { get { return hover; } }
-        public override SD.Color MenuItemSelectedGradientBegin { get { return hover; } }
-        public override SD.Color MenuItemSelectedGradientEnd { get { return hover; } }
-        public override SD.Color SeparatorDark { get { return border; } }
-        public override SD.Color SeparatorLight { get { return bg; } }
-    }
 }

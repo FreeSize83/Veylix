@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
@@ -242,9 +242,10 @@ namespace Veylix
 
         // ====================== содержимое плашек ======================
 
-        void OpenStrategyPicker(FrameworkElement anchor)
+        // Списки вариантов — общие для плашек на главной и для панели трея
+
+        List<PickerItem> StrategyItems(out string title, out string hint)
         {
-            if (PickerBlocked("Стратегию")) return;
             List<PickerItem> items = new List<PickerItem>();
             foreach (Strategy st in strategies)
             {
@@ -263,14 +264,13 @@ namespace Veylix
                 it.Run = delegate { if (s != selected || !engine.IsRunning) OnPickStrategy(s); };
                 items.Add(it);
             }
-            OpenPicker(anchor, "Выбор стратегии",
-                strategies.Count + " стратегий · сейчас " + (selected != null ? selected.Display : "—") + (engine.IsRunning ? " · обход перезапустится" : ""),
-                items);
+            title = "Выбор стратегии";
+            hint = strategies.Count + " стратегий · сейчас " + (selected != null ? selected.Display : "—") + (engine.IsRunning ? " · обход перезапустится" : "");
+            return items;
         }
 
-        void OpenIpsetPicker(FrameworkElement anchor)
+        List<PickerItem> IpsetItems(out string title, out string hint)
         {
-            if (PickerBlocked("IPSet")) return;
             string cur = engine.GetIpsetMode();
             bool hasList = engine.HasIpsetList;
             List<PickerItem> items = new List<PickerItem>();
@@ -284,7 +284,9 @@ namespace Veylix
             upd.Glyph = 0xE896;
             upd.Run = OnUpdateIpset;
             items.Add(upd);
-            OpenPicker(anchor, "IPSet", "Сейчас: " + IpsetLabel(cur) + (engine.IsRunning ? " · обход перезапустится" : ""), items);
+            title = "IPSet";
+            hint = "Сейчас: " + IpsetLabel(cur) + (engine.IsRunning ? " · обход перезапустится" : "");
+            return items;
         }
 
         PickerItem IpsetItem(string mode, string cur, string note, string disabled)
@@ -298,16 +300,17 @@ namespace Veylix
             return it;
         }
 
-        void OpenGamePicker(FrameworkElement anchor)
+        List<PickerItem> GameItems(out string title, out string hint)
         {
-            if (PickerBlocked("Игровой фильтр")) return;
             string cur = engine.GameMode;
             List<PickerItem> items = new List<PickerItem>();
             items.Add(GameItem("disabled", cur, "Игровые порты не обрабатываются"));
             items.Add(GameItem("all", cur, "TCP и UDP, порты 1024–65535"));
             items.Add(GameItem("tcp", cur, "Только TCP, порты 1024–65535"));
             items.Add(GameItem("udp", cur, "Только UDP, порты 1024–65535"));
-            OpenPicker(anchor, "Игровой фильтр", "Сейчас: " + GameLabel(cur) + (engine.IsRunning ? " · обход перезапустится" : ""), items);
+            title = "Игровой фильтр";
+            hint = "Сейчас: " + GameLabel(cur) + (engine.IsRunning ? " · обход перезапустится" : "");
+            return items;
         }
 
         PickerItem GameItem(string mode, string cur, string note)
@@ -318,6 +321,25 @@ namespace Veylix
             it.Current = mode == cur;
             it.Run = delegate { OnSetGame(mode); };
             return it;
+        }
+
+        List<PickerItem> PickerItemsFor(string kind, out string title, out string hint)
+        {
+            if (kind == "ipset") return IpsetItems(out title, out hint);
+            if (kind == "game") return GameItems(out title, out hint);
+            return StrategyItems(out title, out hint);
+        }
+
+        void OpenStrategyPicker(FrameworkElement anchor) { OpenKindPicker(anchor, "strategy", "Стратегию"); }
+        void OpenIpsetPicker(FrameworkElement anchor) { OpenKindPicker(anchor, "ipset", "IPSet"); }
+        void OpenGamePicker(FrameworkElement anchor) { OpenKindPicker(anchor, "game", "Игровой фильтр"); }
+
+        void OpenKindPicker(FrameworkElement anchor, string kind, string what)
+        {
+            if (PickerBlocked(what)) return;
+            string title, hint;
+            List<PickerItem> items = PickerItemsFor(kind, out title, out hint);
+            OpenPicker(anchor, title, hint, items);
         }
     }
 }
