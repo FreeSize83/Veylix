@@ -735,28 +735,110 @@ namespace Veylix
             return TaskExists(TaskName) || TaskExists(LegacyTaskName);
         }
 
+        // Задание создаётся из XML, а не ключами schtasks: у заданий, созданных ключами, Windows по умолчанию
+        // ставит «запускать только от сети» (на ноутбуке от батареи Veylix не стартует) и «остановить через 72 часа».
+        public static string AutorunXml(string exe, string user)
+        {
+            string dir = Path.GetDirectoryName(exe) ?? "";
+            return "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\r\n" +
+                "<Task version=\"1.2\" xmlns=\"http://schemas.microsoft.com/windows/2004/02/mit/task\">" +
+                "<RegistrationInfo><Description>Veylix: запуск в трее при входе в Windows</Description></RegistrationInfo>" +
+                "<Triggers><LogonTrigger><Enabled>true</Enabled><UserId>" + X(user) + "</UserId><Delay>PT10S</Delay></LogonTrigger></Triggers>" +
+                "<Principals><Principal id=\"Author\"><UserId>" + X(user) + "</UserId><LogonType>InteractiveToken</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals>" +
+                "<Settings>" +
+                "<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>" +
+                "<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>" +
+                "<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>" +
+                "<AllowHardTerminate>true</AllowHardTerminate>" +
+                "<StartWhenAvailable>false</StartWhenAvailable>" +
+                "<RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>" +
+                "<IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings>" +
+                "<AllowStartOnDemand>true</AllowStartOnDemand>" +
+                "<Enabled>true</Enabled>" +
+                "<Hidden>false</Hidden>" +
+                "<RunOnlyIfIdle>false</RunOnlyIfIdle>" +
+                "<WakeToRun>false</WakeToRun>" +
+                "<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>" +
+                "<Priority>7</Priority>" +
+                "</Settings>" +
+                "<Actions Context=\"Author\"><Exec><Command>" + X(exe) + "</Command><Arguments>--autostart</Arguments>" +
+                "<WorkingDirectory>" + X(dir) + "</WorkingDirectory></Exec></Actions></Task>";
+        }
+
+        static string X(string s)
+        {
+            return System.Security.SecurityElement.Escape(s ?? "");
+        }
+
+        // Задание в порядке: ведёт на этот exe, с ключом --autostart, без ограничений по батарее и времени работы
+        public static bool AutorunHealthy(string taskXml, string exe)
+        {
+            if (string.IsNullOrEmpty(taskXml)) return false;
+            Match m = Regex.Match(taskXml, "<Command>(.*?)</Command>", RegexOptions.Singleline);
+            if (!m.Success) return false;
+            string cmd = System.Net.WebUtility.HtmlDecode(m.Groups[1].Value).Trim().Trim('"');
+            string a, b;
+            try { a = Path.GetFullPath(cmd); b = Path.GetFullPath(exe); }
+            catch { return false; }
+            return string.Equals(a, b, StringComparison.OrdinalIgnoreCase) &&
+                   taskXml.Contains("--autostart") &&
+                   taskXml.Contains("<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>") &&
+                   taskXml.Contains("<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>") &&
+                   !taskXml.Contains("<Enabled>false</Enabled>");
+        }
+
+        static string CreateAutorunTask(string exe)
+        {
+            string user = System.Security.Principal.WindowsIdentity.GetCurrent().Name;
+            string file = Path.Combine(Path.GetTempPath(), "veylix-autorun-" + Guid.NewGuid().ToString("N").Substring(0, 8) + ".xml");
+            try
+            {
+                File.WriteAllText(file, AutorunXml(exe, user), Encoding.Unicode);
+                string o;
+                int code = RunHidden("schtasks.exe", "/Create /TN " + TaskName + " /XML \"" + file + "\" /F", 20000, out o);
+                if (code != 0) return string.IsNullOrEmpty(o) ? "код " + code : o.Trim();
+                if (TaskExists(LegacyTaskName)) RunHidden("schtasks.exe", "/Delete /TN " + LegacyTaskName + " /F", 20000, out o);
+                return null;
+            }
+            catch (Exception ex) { return ex.Message; }
+            finally { try { File.Delete(file); } catch { } }
+        }
+
         public static string SetAutorun(bool on, string exe)
         {
-            string o = "";
-            int code = 0;
             if (on)
             {
-                code = RunHidden("schtasks.exe",
-                    "/Create /TN " + TaskName + " /SC ONLOGON /RL HIGHEST /F /TR \"\\\"" + exe + "\\\" --autostart\"",
-                    20000, out o);
-                if (code == 0 && TaskExists(LegacyTaskName))
-                    RunHidden("schtasks.exe", "/Delete /TN " + LegacyTaskName + " /F", 20000, out o);
+                string err = CreateAutorunTask(exe);
+                if (err != null) return err;
+                // проверяем, что задание действительно появилось и настроено как надо
+                return AutorunHealthy(QueryTaskXml(TaskName), exe) ? null : "задание создано, но Windows сохранила его с другими настройками";
             }
-            else
+            string o = "";
+            int code = 0;
+            foreach (string name in new string[] { TaskName, LegacyTaskName })
             {
-                foreach (string name in new string[] { TaskName, LegacyTaskName })
-                {
-                    if (!TaskExists(name)) continue;
-                    code = RunHidden("schtasks.exe", "/Delete /TN " + name + " /F", 20000, out o);
-                    if (code != 0) break;
-                }
+                if (!TaskExists(name)) continue;
+                code = RunHidden("schtasks.exe", "/Delete /TN " + name + " /F", 20000, out o);
+                if (code != 0) break;
             }
             return code == 0 ? null : (string.IsNullOrEmpty(o) ? "код " + code : o.Trim());
+        }
+
+        static string QueryTaskXml(string name)
+        {
+            string o;
+            return RunHidden("schtasks.exe", "/Query /TN " + name + " /XML", 10000, out o) == 0 ? o : null;
+        }
+
+        // При запуске Veylix: если автозапуск включён, но задание старое (путь к exe изменился после переноса,
+        // ограничения по батарее и 72 часам от прежних версий) — пересоздаём. Возвращает текст для журнала или null.
+        public static string RepairAutorun(string exe)
+        {
+            string name = TaskExists(TaskName) ? TaskName : TaskExists(LegacyTaskName) ? LegacyTaskName : null;
+            if (name == null) return null;
+            if (name == TaskName && AutorunHealthy(QueryTaskXml(TaskName), exe)) return null;
+            string err = CreateAutorunTask(exe);
+            return err == null ? "ok" : err;
         }
     }
 }

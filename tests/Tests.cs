@@ -50,6 +50,7 @@ namespace Veylix.Tests
                 Run("Установка обновления и откат", TestInstall);
                 Run("Очистка журнала", TestSanitize);
                 Run("Стратегии и аргументы winws", TestEngine);
+                Run("Автозапуск: задание Планировщика", TestAutorun);
                 Run("Вердикты сетевых проверок", TestVerdicts);
                 Run("Диагностика", TestDiagnostics);
                 Run("Команды и палитра", TestCommands);
@@ -373,6 +374,34 @@ namespace Veylix.Tests
             Check(!s.Contains("feed"), "IPv6 замаскирован");
             Check(LogStore.Redact("Bearer abcdefghijklmnop").Contains("***"), "Bearer-токен скрыт");
             Check(LogStore.Sanitize("Flowseal 1.10.3 · ALT3").Contains("1.10.3"), "номер версии не портится");
+        }
+
+        static void TestAutorun()
+        {
+            string exe = @"C:\Program Files\Veylix & Co\Veylix.exe";
+            string xml = Engine.AutorunXml(exe, @"PC\Пользователь");
+            System.Xml.XmlDocument doc = new System.Xml.XmlDocument();
+            bool parsed = true;
+            try { doc.LoadXml(xml.Substring(xml.IndexOf('<', 1))); } catch { parsed = false; }
+            Check(parsed, "XML задания корректен (спецсимволы в пути экранированы)");
+            Check(xml.Contains("<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>"), "запуск и от батареи");
+            Check(xml.Contains("<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>"), "не останавливается при переходе на батарею");
+            Check(xml.Contains("<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>"), "без лимита 72 часа");
+            Check(xml.Contains("<RunLevel>HighestAvailable</RunLevel>"), "с правами администратора");
+            Check(xml.Contains("<Arguments>--autostart</Arguments>"), "ключ --autostart");
+            Check(xml.Contains("<WorkingDirectory>C:\\Program Files\\Veylix &amp; Co</WorkingDirectory>"), "рабочая папка — папка exe");
+
+            Check(Engine.AutorunHealthy(xml, exe), "своё задание считается исправным");
+            Check(Engine.AutorunHealthy(xml, exe.ToUpperInvariant()), "путь сравнивается без учёта регистра");
+            Check(!Engine.AutorunHealthy(xml, @"D:\Other\Veylix.exe"), "Veylix перенесён — задание нужно обновить");
+            Check(!Engine.AutorunHealthy(xml.Replace("<DisallowStartIfOnBatteries>false", "<DisallowStartIfOnBatteries>true"), exe), "ограничение по батарее — задание нужно обновить");
+            Check(!Engine.AutorunHealthy(xml.Replace("<ExecutionTimeLimit>PT0S", "<ExecutionTimeLimit>PT72H"), exe), "лимит 72 часа — задание нужно обновить");
+            Check(!Engine.AutorunHealthy(xml.Replace("<Settings>", "<Settings><Enabled>false</Enabled>"), exe), "отключённое задание — нужно обновить");
+            // так выглядело задание прежних версий (schtasks /Create ... /TR "\"exe\" --autostart")
+            string legacy = "<Task><Settings><DisallowStartIfOnBatteries>true</DisallowStartIfOnBatteries><ExecutionTimeLimit>PT72H</ExecutionTimeLimit></Settings>" +
+                            "<Actions><Exec><Command>\"" + exe.Replace("&", "&amp;") + "\"</Command><Arguments>--autostart</Arguments></Exec></Actions></Task>";
+            Check(!Engine.AutorunHealthy(legacy, exe), "задание прежней версии обновляется");
+            Check(!Engine.AutorunHealthy(null, exe), "нет XML — не исправно");
         }
 
         static void TestEngine()

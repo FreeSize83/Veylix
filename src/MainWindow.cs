@@ -214,9 +214,9 @@ namespace Veylix
             // вместо стандартного меню — своя панель в стиле приложения (TrayFlyout.cs)
             tray.MouseClick += delegate(object s, WF.MouseEventArgs e)
             {
-                if (e.Button == WF.MouseButtons.Left || e.Button == WF.MouseButtons.Right) ToggleFlyout();
+                if (e.Button == WF.MouseButtons.Right) ToggleFlyout();                    // ПКМ — панель трея
+                else if (e.Button == WF.MouseButtons.Left) { CloseFlyout(); ShowFromTray(); }   // ЛКМ — окно Veylix
             };
-            tray.DoubleClick += delegate(object s, EventArgs e) { CloseFlyout(); ShowFromTray(); };
             tray.Visible = true;
         }
 
@@ -304,6 +304,13 @@ namespace Veylix
                 autorunBusy = true;
                 RefreshSettingsState();
                 autorunOn = await Task.Run(() => Engine.IsAutorun());
+                if (autorunOn && !selfTest)
+                {
+                    string exePath = Assembly.GetExecutingAssembly().Location;
+                    string fix = await Task.Run(() => Engine.RepairAutorun(exePath));
+                    if (fix == "ok") log.Add("info", "Автозапуск: задание в Планировщике обновлено (новый путь к Veylix или настройки прежней версии).");
+                    else if (fix != null) log.Add("err", "Автозапуск: не удалось обновить задание — " + fix + ". Выключите и снова включите автозапуск в настройках.");
+                }
                 autorunBusy = false;
                 RefreshSettingsState();
 
@@ -986,6 +993,8 @@ namespace Veylix
                 if (err != null)
                 {
                     log.Add("err", "Автозапуск: " + err);
+                    Toast("autorun-err", "err", "Автозапуск не изменён", err, "journal", true);
+                    autorunOn = await Task.Run(() => Engine.IsAutorun());
                 }
                 else
                 {
