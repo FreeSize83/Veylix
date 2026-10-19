@@ -1506,7 +1506,7 @@ namespace Veylix
             tgTray = new VToggle();
             tgTray.Clicked += delegate { ToggleCloseToTray(); };
             TextBlock d3;
-            s2.Children.Add(Ui.SettingRow("Закрывать в трей", "Если обход работает, крестик прячет окно в трей вместо выхода. Значок в трее: двойной щелчок — открыть, правый — меню.", tgTray, out d3));
+            s2.Children.Add(Ui.SettingRow("Закрывать в трей", "Если обход работает, крестик прячет окно в трей вместо выхода. Значок в трее: левая кнопка — открыть окно, правая — панель трея.", tgTray, out d3));
             tgToasts = new VToggle();
             tgToasts.Clicked += delegate { ToggleToasts(); };
             TextBlock d5;
@@ -1515,6 +1515,7 @@ namespace Veylix
                 "Потеря соединения и критические ошибки показываются всегда. Повторы объединяются, звуков нет; история — в разделе «События».", tgToasts, out d5));
             c2.Content = s2;
             sp.Children.Add(c2);
+            sp.Children.Add(BuildGameModeCard());
 
             // ---- о программе ----
             Card c4 = new Card(22);
@@ -1766,6 +1767,7 @@ namespace Veylix
         void RefreshSettingsState()
         {
             if (tgAutorun == null) return;
+            RefreshGameModeCard();
             tgAutorun.IsOn = autorunOn;
             tgAutorun.IsEnabled = !autorunBusy;
             tgTray.IsOn = cfg.CloseToTray;

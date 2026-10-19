@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -26,6 +26,8 @@ namespace Veylix
         public bool CompanionVisible = true;  // пчёлка-компаньон на главной
         public bool CompanionAnimated = true; // анимации пчёлки (действуют, только если анимации включены вообще)
         public ThemeOptions Studio = new ThemeOptions();   // Theme Studio: акцент, свечение, углы, плотность, скорость
+        public bool GameWatch = false;        // игровой режим: пауза обхода, пока запущена игра из списка
+        public string GameWatchList = "";     // exe игр и античитов через «|»
 
         public const string DefaultPinned = "check.services,diag.run,lists.user,lists.exclude,ipset.update,folder.open";
         public static readonly int[] PulseIntervals = { 30, 60, 120, 300 };
@@ -111,6 +113,8 @@ namespace Veylix
                 case "StudioCorners": Studio.Corners = ThemeOptions.PickName(v, ThemeOptions.CornerNames, "standard"); break;
                 case "StudioDensity": Studio.Density = ThemeOptions.PickName(v, ThemeOptions.DensityNames, "normal"); break;
                 case "StudioSpeed": Studio.Speed = ThemeOptions.PickName(v, ThemeOptions.SpeedNames, "normal"); break;
+                case "GameWatch": GameWatch = v == "1" || v.Equals("true", StringComparison.OrdinalIgnoreCase); break;
+                case "GameWatchList": GameWatchList = v; break;
                 default:
                     if (!extra.ContainsKey(k)) order.Add(k);
                     extra[k] = v;
@@ -150,6 +154,8 @@ namespace Veylix
             sb.Append("StudioCorners=").Append(Studio.Corners).Append("\r\n");
             sb.Append("StudioDensity=").Append(Studio.Density).Append("\r\n");
             sb.Append("StudioSpeed=").Append(Studio.Speed).Append("\r\n");
+            sb.Append("GameWatch=").Append(GameWatch ? "1" : "0").Append("\r\n");
+            sb.Append("GameWatchList=").Append(GameWatchList).Append("\r\n");
             foreach (string k in order)
                 sb.Append(k).Append('=').Append(extra[k]).Append("\r\n");
             return sb.ToString();

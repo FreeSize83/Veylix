@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
@@ -169,6 +169,17 @@ namespace Veylix
             check.Unavailable = delegate { return checking ? "проверка уже идёт" : null; };
             check.Keywords = "доступность discord youtube интернет соединение";
             check.Short = "Проверить сервисы";
+            AppCommand gw = Cmd("games.toggle", net, 0xE7FC, "Включить игровой режим", null, delegate
+            {
+                cfg.GameWatch = !cfg.GameWatch;
+                SaveSettings();
+                log.Add("info", cfg.GameWatch ? "Игровой режим включён." : "Игровой режим выключен.");
+                RefreshGameModeCard();
+                if (cfg.GameWatch && GameList.Count == 0) Page("settings");
+                CheckGames();
+            });
+            gw.DynamicTitle = delegate { return cfg.GameWatch ? "Выключить игровой режим" : "Включить игровой режим"; };
+            gw.Keywords = "игры античит vanguard valorant faceit пауза";
             AppCommand diag = Cmd("diag.run", chk, 0xE9D9, "Запустить диагностику", "Ctrl+D", delegate { Page("diag"); RunDiagnostics(); });
             diag.Unavailable = delegate { return diagRunning ? "диагностика уже идёт" : null; };
             diag.Short = "Диагностика";

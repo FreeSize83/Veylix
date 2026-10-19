@@ -137,6 +137,7 @@ namespace Veylix
                 if (page == "events") RefreshStats();
                 UpdateCompanion();
                 if (++ticks % 15 == 0) RefreshMap();
+                if (ticks % 2 == 0) CheckGames();
                 if (ticks % 30 == 0) CheckThemeSchedule();
             };
             timer.Start();
@@ -314,7 +315,7 @@ namespace Veylix
                 autorunBusy = false;
                 RefreshSettingsState();
 
-                if (autoMode)
+                if (autoMode && !DeferStartForGame(selected))
                 {
                     log.Add("info", "Автозапуск: включаю последнюю стратегию " + selected.Display + ".");
                     await StartAsync(selected);
@@ -369,6 +370,8 @@ namespace Veylix
             else if (run) state = "run";
             else state = "off";
             ApplyPowerState(state, name);
+            ApplyGamePauseState();
+            RefreshGameStatus();
 
             tileStrat.Text = selected != null ? selected.Display : "—";
             tileIpset.Text = IpsetLabel(engine.GetIpsetMode());
@@ -380,7 +383,7 @@ namespace Veylix
             {
                 try
                 {
-                    string tt = run ? "Veylix — работает: " + name : "Veylix — обход выключен";
+                    string tt = run ? "Veylix — работает: " + name : gamePausedFor != null ? "Veylix — пауза для игры: " + GameWatch.Pretty(gamePausedFor) : "Veylix — обход выключен";
                     tray.Text = tt.Length > 63 ? tt.Substring(0, 63) : tt;
                 }
                 catch { }
@@ -428,7 +431,11 @@ namespace Veylix
             {
                 if (busy || tuning || updating) return;
                 if (engine.IsRunning) await StopAsync();
-                else await StartAsync(selected);
+                else
+                {
+                    ClearGamePauseByUser();
+                    await StartAsync(selected);
+                }
             }
             catch (Exception ex)
             {
@@ -1206,6 +1213,26 @@ namespace Veylix
                     }
                 }
             }
+
+            // Игровой режим: карточка целиком — с наборами и списком, в состоянии паузы
+            foreach (string fam in new string[] { "purple", "cream" })
+            {
+                cfg.Theme = fam;
+                Theme.Apply(Theme.Build(fam, fam != "cream"), false);
+                cfg.GameWatch = true;
+                cfg.GameWatchList = "vgc.exe|valorant-win64-shipping.exe|league of legends.exe|rainbowsix.exe";
+                gamePausedFor = "valorant-win64-shipping.exe";
+                RefreshGameModeCard();
+                ShowPage("settings");
+                design.Measure(new Size(DW, DH));
+                design.Arrange(new Rect(0, 0, DW, DH));
+                design.UpdateLayout();
+                SnapElement(gamesCard, Path.Combine(dir, "games-" + Theme.Current.Id + ".png"));
+            }
+            gamePausedFor = null;
+            cfg.GameWatch = false;
+            cfg.GameWatchList = "";
+            RefreshGameModeCard();
 
             // Theme Studio: карточка целиком при разных настройках (поверх разных тем)
             string[][] studio = {

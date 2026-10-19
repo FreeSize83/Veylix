@@ -184,13 +184,15 @@ namespace Veylix
                 TimeSpan u = DateTime.Now - engine.StartedAt;
                 sub = (engine.Current != null ? engine.Current.Display : "") + " · " + string.Format("{0:00}:{1:00}:{2:00}", (int)u.TotalHours, u.Minutes, u.Seconds);
             }
+            else if (gamePausedFor != null) sub = "Пауза для игры: " + GameWatch.Pretty(gamePausedFor);
             else sub = "Обход выключен";
             TextBlock st = Theme.T(sub, 12, "Text2", false);
             st.TextTrimming = TextTrimming.CharacterEllipsis;
             ht.Children.Add(st);
             Grid.SetColumn(ht, 1);
             head.Children.Add(ht);
-            Border chip = Ui.Chip(tuning ? "Подбор" : busy ? "…" : run ? "Работает" : "Выключен", tuning || busy ? "busy" : run ? "ok" : "idle");
+            bool paused = !run && gamePausedFor != null;
+            Border chip = Ui.Chip(tuning ? "Подбор" : busy ? "…" : run ? "Работает" : paused ? "Пауза" : "Выключен", tuning || busy ? "busy" : run ? "ok" : paused ? "warn" : "idle");
             Grid.SetColumn(chip, 2);
             head.Children.Add(chip);
             root.Children.Add(head);

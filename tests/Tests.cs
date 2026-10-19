@@ -51,6 +51,7 @@ namespace Veylix.Tests
                 Run("Очистка журнала", TestSanitize);
                 Run("Стратегии и аргументы winws", TestEngine);
                 Run("Автозапуск: задание Планировщика", TestAutorun);
+                Run("Игровой режим", TestGameWatch);
                 Run("Вердикты сетевых проверок", TestVerdicts);
                 Run("Диагностика", TestDiagnostics);
                 Run("Команды и палитра", TestCommands);
@@ -374,6 +375,48 @@ namespace Veylix.Tests
             Check(!s.Contains("feed"), "IPv6 замаскирован");
             Check(LogStore.Redact("Bearer abcdefghijklmnop").Contains("***"), "Bearer-токен скрыт");
             Check(LogStore.Sanitize("Flowseal 1.10.3 · ALT3").Contains("1.10.3"), "номер версии не портится");
+        }
+
+        static void TestGameWatch()
+        {
+            Eq("valorant-win64-shipping.exe", GameWatch.Normalize("C:\\Riot Games\\VALORANT\\live\\ShooterGame\\Binaries\\Win64\\VALORANT-Win64-Shipping.exe"), "путь → имя exe");
+            Eq("rainbowsix.exe", GameWatch.Normalize("RainbowSix"), "без .exe — добавляется");
+            Eq("league of legends.exe", GameWatch.Normalize("  \"League of Legends.exe\"  "), "кавычки и пробелы");
+            Eq(null, GameWatch.Normalize("   "), "пустое имя");
+            Eq(null, GameWatch.Normalize("bad|name"), "недопустимый символ");
+
+            List<string> l = GameWatch.Parse("vgc.exe|Game, The.exe||VGC.EXE|faceit");
+            Eq(3, l.Count, "разбор списка: дубли и пустые убраны, запятая в имени сохраняется");
+            Eq("game, the.exe", l[1], "имя с запятой");
+            Eq("vgc.exe|game, the.exe|faceit.exe", GameWatch.Join(l), "сохранение списка");
+            Eq(0, GameWatch.Parse("").Count, "пустая строка — пустой список");
+
+            List<string> running = new List<string> { "explorer", "Discord", "VALORANT-Win64-Shipping", "svchost" };
+            Eq("valorant-win64-shipping.exe", GameWatch.FindRunning(new List<string> { "vgc.exe", "valorant-win64-shipping.exe" }, running), "игра найдена без учёта регистра");
+            Eq(null, GameWatch.FindRunning(new List<string> { "vgc.exe" }, running), "игры из списка нет");
+            Eq(null, GameWatch.FindRunning(new List<string>(), running), "пустой список — ничего не ищем");
+            Eq("discord.exe", GameWatch.FindRunning(new List<string> { "discord.exe" }, new List<string> { "Discord.exe" }), "имя процесса уже с .exe");
+
+            Eq("Vanguard", GameWatch.Pretty("vgc.exe"), "понятное имя античита");
+            Eq("Valorant", GameWatch.Pretty("valorant-win64-shipping.exe"), "понятное имя игры");
+            Eq("rainbowsix", GameWatch.Pretty("rainbowsix.exe"), "своё имя — без .exe");
+            foreach (GameWatch.Preset p in GameWatch.Presets)
+                foreach (string n in p.Names)
+                    Eq(n, GameWatch.Normalize(n), "набор " + p.Title + ": имя в нормальной форме");
+            Check(GameWatch.HasPreset(GameWatch.Parse("vgc.exe|valorant-win64-shipping.exe|league of legends.exe"), GameWatch.Presets[0]), "набор целиком в списке");
+            Check(!GameWatch.HasPreset(GameWatch.Parse("vgc.exe"), GameWatch.Presets[0]), "набор не целиком");
+
+            Settings st = Settings.Load();
+            Eq(false, st.GameWatch, "игровой режим по умолчанию выключен");
+            st.GameWatch = true;
+            st.GameWatchList = "vgc.exe|game, the.exe";
+            Eq(null, st.Save(), "сохранение настроек игрового режима");
+            Settings st2 = Settings.Load();
+            Eq(true, st2.GameWatch, "игровой режим сохраняется");
+            Eq("vgc.exe|game, the.exe", st2.GameWatchList, "список игр сохраняется");
+            st2.GameWatch = false;
+            st2.GameWatchList = "";
+            st2.Save();
         }
 
         static void TestAutorun()
