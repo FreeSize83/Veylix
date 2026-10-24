@@ -284,6 +284,49 @@ namespace Veylix
         }
 
         bool started;
+        bool autoStartPending;   // автозапуск ещё пытается включить обход; ручное нажатие кнопки его отменяет
+
+        // Сразу после входа в Windows сеть, служба BFE и драйвер WinDivert бывают ещё не готовы,
+        // и winws.exe завершается. Поэтому ждём сеть и повторяем запуск несколько раз.
+        async Task AutoStartBypass()
+        {
+            Strategy s = selected;
+            if (s == null) { log.Add("err", "Автозапуск: стратегия не выбрана — обход не включён."); return; }
+            autoStartPending = true;
+            try
+            {
+                if (!NetworkUp())
+                {
+                    log.Add("info", "Автозапуск: жду подключения к сети…");
+                    DateTime until = DateTime.Now.AddSeconds(90);
+                    while (!NetworkUp() && DateTime.Now < until && autoStartPending && !reallyExit) await Task.Delay(2000);
+                }
+                int[] pauses = { 0, 5, 15, 30 };
+                for (int i = 0; i < pauses.Length; i++)
+                {
+                    if (pauses[i] > 0)
+                    {
+                        log.Add("warn", "Автозапуск: обход не включился, повтор через " + pauses[i] + " с (попытка " + (i + 1) + " из " + pauses.Length + ").");
+                        await Task.Delay(pauses[i] * 1000);
+                    }
+                    while ((busy || tuning || updating) && autoStartPending && !reallyExit) await Task.Delay(1000);
+                    if (!autoStartPending || reallyExit || engine.IsRunning || gamePausedFor != null) return;
+                    s = selected ?? s;   // стратегию могли сменить, пока ждали
+                    log.Add("info", "Автозапуск: включаю последнюю стратегию " + s.Display + ".");
+                    if (await StartAsync(s)) return;
+                }
+                log.Add("err", "Автозапуск: обход так и не включился. Включите его вручную или выберите другую стратегию.");
+                Toast("autostart-err", "err", "Обход не включился при автозапуске", "Veylix запущен, но winws.exe не стартовал. Подробности — в журнале.", "journal", true);
+                if (!IsVisible) TrayBalloon("Обход не включился", "Veylix запущен, но обход не стартовал. Откройте Veylix, чтобы включить его.", WF.ToolTipIcon.Warning);
+            }
+            finally { autoStartPending = false; }
+        }
+
+        static bool NetworkUp()
+        {
+            try { return System.Net.NetworkInformation.NetworkInterface.GetIsNetworkAvailable(); }
+            catch { return true; }
+        }
 
         async void OnFirstShow()
         {
@@ -292,6 +335,7 @@ namespace Veylix
             try
             {
                 log.Add("info", "Veylix " + Program.Version + " · Flowseal " + (engine.InstalledVersion() ?? "?") + " · файлы: " + engine.Root);
+                if (autoMode) log.Add("info", "Запуск при входе в Windows (автозапуск).");
                 if (Settings.MigrationNote != null) log.Add("info", Settings.MigrationNote);
                 HandlePostUpdate();
                 if (!Diagnostics.IsAdmin()) log.Add("err", "Нет прав администратора — winws.exe не сможет загрузить драйвер WinDivert.");
@@ -315,11 +359,7 @@ namespace Veylix
                 autorunBusy = false;
                 RefreshSettingsState();
 
-                if (autoMode && !DeferStartForGame(selected))
-                {
-                    log.Add("info", "Автозапуск: включаю последнюю стратегию " + selected.Display + ".");
-                    await StartAsync(selected);
-                }
+                if (autoMode && !DeferStartForGame(selected)) await AutoStartBypass();
                 if (engine.CheckUpdatesEnabled) await CheckUpdates(false);
                 if (cfg.AppUpdateCheck && Program.PostUpdatePlan == null) CheckAppUpdate(false);
             }
@@ -430,6 +470,7 @@ namespace Veylix
             try
             {
                 if (busy || tuning || updating) return;
+                autoStartPending = false;
                 if (engine.IsRunning) await StopAsync();
                 else
                 {
