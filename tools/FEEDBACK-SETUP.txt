@@ -1,0 +1,45 @@
+Обратная связь Veylix → ваш Telegram
+====================================
+
+Пользователь пишет в Veylix (Настройки → «Написать разработчику» или Ctrl+K), сообщение
+уходит на ваш Cloudflare Worker, а тот пересылает его вашему боту в Telegram.
+Пользователям Telegram не нужен. Токен бота хранится только в Worker, в Veylix.exe его нет.
+Всё бесплатно (бесплатный тариф Cloudflare — 100 000 запросов в день).
+
+1. БОТ (2 минуты)
+   * В Telegram откройте @BotFather → /newbot → имя (например «Veylix Feedback»)
+     → логин, оканчивающийся на bot. BotFather пришлёт токен вида 123456789:AA...
+   * Откройте своего нового бота и нажмите «Start» — иначе он не сможет вам писать.
+   * Узнайте свой ID: напишите @userinfobot — он ответит числом (Id: 123456789).
+
+2. WORKER (5 минут)
+   * Зарегистрируйтесь на https://dash.cloudflare.com (почта и пароль, карта не нужна).
+   * Слева «Compute (Workers)» → «Workers & Pages» → «Create» → «Start with Hello World!»
+     → имя, например veylix-feedback → «Deploy».
+   * «Edit code» → удалите всё в worker.js и вставьте содержимое tools\feedback-worker.js
+     → «Deploy».
+   * Вернитесь к Worker → «Settings» → «Variables and Secrets» → «Add»:
+        BOT_TOKEN — тип Secret, значение — токен от BotFather;
+        CHAT_ID   — тип Text (или Secret), значение — ваш ID от @userinfobot.
+     → «Deploy».
+   * Адрес Worker виден вверху страницы: https://veylix-feedback.<ваше-имя>.workers.dev
+     Откройте его в браузере — должно быть {"ok":true,"service":"veylix-feedback"}.
+
+3. VEYLIX
+   * Впишите адрес с /feedback на конце в src\Feedback.cs:
+        public const string Endpoint = "https://veylix-feedback.<ваше-имя>.workers.dev/feedback";
+   * Соберите и выпустите версию — у пользователей появится форма отправки.
+
+ЗАЩИТА ОТ СПАМА
+   * Не больше 5 сообщений в час с одного IP, текст до 2000 символов, отчёт до 60 КБ.
+   * Счётчик по умолчанию хранится в памяти Worker (у Cloudflare несколько серверов, поэтому
+     лимит приблизительный). Для точного лимита: «Storage & Databases» → «KV» → «Create»
+     (например veylix-rate), затем в Worker → «Settings» → «Bindings» → «Add» → KV namespace,
+     имя переменной RATE.
+   * Если кто-то начнёт спамить — смените токен в @BotFather (/revoke) и обновите BOT_TOKEN.
+
+ЧТО ПРИХОДИТ
+   Тип (идея / ошибка / сообщение), текст, контакт (если указан), версия Veylix и Windows,
+   стратегия и страна (по данным Cloudflare). Если пользователь отметил «Приложить отчёт» —
+   отдельным файлом отчёт диагностики и последние строки журнала; имя пользователя,
+   компьютера и полные IP-адреса в них уже скрыты.

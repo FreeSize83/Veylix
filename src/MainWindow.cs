@@ -1307,6 +1307,19 @@ namespace Veylix
                 design.Arrange(new Rect(0, 0, DW, DH));
                 design.UpdateLayout();
                 SnapElement(dnsCard, Path.Combine(dir, "dns-" + Theme.Current.Id + ".png"));
+                ShowPage("settings");
+                fbKind = "bug";
+                fbText.Text = "После обновления до 2.3.6 YouTube открывается, но видео грузится рывками. Стратегия ALT13, провайдер Ростелеком.";
+                fbContact.Text = "@username";
+                tgFbReport.IsOn = true;
+                RefreshFeedbackCard();
+                design.Measure(new Size(DW, DH));
+                design.Arrange(new Rect(0, 0, DW, DH));
+                design.UpdateLayout();
+                SnapElement(feedbackCard, Path.Combine(dir, "feedback-" + Theme.Current.Id + ".png"));
+                fbText.Text = "";
+                fbContact.Text = "";
+                tgFbReport.IsOn = false;
 
                 // «Что нового»: содержимое окна после обновления с 2.3.4
                 Border wn = new Border();

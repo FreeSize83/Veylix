@@ -399,6 +399,9 @@ namespace Veylix
             VButton qd = Ui.IconButton(0xE9D9, "Быстрая диагностика (Ctrl+D)");
             qd.Click += delegate { commandById["diag.run"].Run(); };
             wb.Children.Add(qd);
+            VButton fb = Ui.IconButton(0xE8BD, "Написать разработчику: идея или ошибка");
+            fb.Click += delegate { OpenFeedback(); };
+            wb.Children.Add(fb);
             VButton min = Ui.IconButton(0xE921, "Свернуть");
             min.Click += delegate { WindowState = WindowState.Minimized; };
             VButton tr = Ui.IconButton(0xE8A0, "Скрыть в трей (обход продолжит работать)");
@@ -1520,6 +1523,7 @@ namespace Veylix
             c2.Content = s2;
             sp.Children.Add(c2);
             sp.Children.Add(BuildGameModeCard());
+            sp.Children.Add(BuildFeedbackCard());
 
             // ---- о программе ----
             Card c4 = new Card(22);
@@ -1527,7 +1531,7 @@ namespace Veylix
             StackPanel s4 = new StackPanel();
             s4.Children.Add(Ui.Heading("О Veylix " + Program.Version,
                 "Veylix — оболочка для zapret-discord-youtube (Flowseal). Обход выполняет winws.exe с драйвером WinDivert; " +
-                "Veylix запускает оригинальные стратегии general*.bat без изменений и не трогает системные настройки сети и прокси."));
+                "Veylix запускает оригинальные стратегии general*.bat без изменений и не меняет настройки сети и прокси — кроме DNS, и то только если вы сами включите защищённый DNS."));
             WrapPanel ab = new WrapPanel();
             ab.Margin = new Thickness(0, 14, 0, 0);
             VButton dd = Ui.Button("Папка данных", 0xE838, false);

@@ -211,6 +211,7 @@ namespace Veylix
                 if (!IsVisible) ShowFromTray();
                 ShowWhatsNew(WhatsNew.Recent(Program.Version, 3), false);
             }).Keywords = "изменения changelog версия новое обновление";
+            Cmd("feedback.open", chk, 0xE8BD, "Написать разработчику", null, OpenFeedback).Keywords = "отзыв идея ошибка баг предложение обратная связь telegram автор";
             AppCommand upd = Cmd("updates.check", chk, 0xE895, "Проверить обновления Flowseal", "Ctrl+U", delegate { Page("updates"); CheckUpdatesCommand(); });
             upd.Unavailable = delegate { return updating ? "идёт обновление" : null; };
             upd.Short = "Обновления";

@@ -55,6 +55,7 @@ namespace Veylix.Tests
                 Run("Игровой режим", TestGameWatch);
                 Run("Проверка сайта", TestSiteCheck);
                 Run("Что нового после обновления", TestWhatsNew);
+                Run("Обратная связь", TestFeedback);
                 Run("DNS через HTTPS и резервная копия DNS", TestDoh);
                 Run("Вердикты сетевых проверок", TestVerdicts);
                 Run("Диагностика", TestDiagnostics);
@@ -379,6 +380,31 @@ namespace Veylix.Tests
             Check(!s.Contains("feed"), "IPv6 замаскирован");
             Check(LogStore.Redact("Bearer abcdefghijklmnop").Contains("***"), "Bearer-токен скрыт");
             Check(LogStore.Sanitize("Flowseal 1.10.3 · ALT3").Contains("1.10.3"), "номер версии не портится");
+        }
+
+        static void TestFeedback()
+        {
+            Check(Feedback.Endpoint.Length == 0 || (Feedback.Endpoint.StartsWith("https://") && Feedback.Endpoint.EndsWith("/feedback")), "адрес Worker: пусто или https://…/feedback");
+            Check(Feedback.Validate("  а ") != null, "слишком коротко");
+            Check(Feedback.Validate(new string('x', Feedback.MaxText + 1)) != null, "слишком длинно");
+            Eq(null, Feedback.Validate("Добавьте горячую клавишу"), "нормальный текст");
+
+            string p = Feedback.BuildPayload("evil", "  Текст «с кавычками» \"и\" \\ слэшем\r\nи строкой  ", new string('c', 500), "ALT13", true, "Windows 11 23H2 (22631)", new string('r', Feedback.MaxReport + 10));
+            Dictionary<string, object> d = new System.Web.Script.Serialization.JavaScriptSerializer { MaxJsonLength = 1 << 24 }.Deserialize<Dictionary<string, object>>(p);
+            Eq("other", (string)d["kind"], "неизвестный тип → other");
+            Eq("Текст «с кавычками» \"и\" \\ слэшем\r\nи строкой", (string)d["text"], "текст без лишних пробелов, экранирование JSON");
+            Eq(Feedback.MaxContact, ((string)d["contact"]).Length, "контакт обрезан");
+            Eq(Feedback.MaxReport, ((string)d["report"]).Length, "отчёт обрезан");
+            Eq(Program.Version, (string)d["version"], "версия Veylix");
+            Eq(true, (bool)d["running"], "состояние обхода");
+            Eq("idea", (string)new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<Dictionary<string, object>>(Feedback.BuildPayload("idea", "abc", null, null, false, null, null))["kind"], "тип идея");
+
+            Eq(null, Feedback.ParseResponse(200, "{\"ok\":true}"), "доставлено");
+            Check(Feedback.ParseResponse(429, "{\"ok\":false,\"error\":\"слишком много\"}").Contains("через час"), "лимит");
+            Check(Feedback.ParseResponse(502, "{\"ok\":false,\"error\":\"не удалось доставить сообщение\"}").Contains("не удалось доставить"), "ошибка сервера с текстом");
+            Check(Feedback.ParseResponse(500, "<html>").Contains("500"), "ответ не JSON");
+            Check(Feedback.ParseResponse(200, "{\"ok\":false}") != null, "200 без ok — не доставлено");
+            Check(Feedback.WindowsVersion().StartsWith("Windows"), "версия Windows");
         }
 
         static void TestWhatsNew()
