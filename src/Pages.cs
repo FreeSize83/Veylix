@@ -138,6 +138,7 @@ namespace Veylix
             AddPage(host, "pulse", BuildPulse());
             diagPage = BuildDiagnostics();
             AddPage(host, "diag", diagPage);
+            AddPage(host, "sites", BuildSites());
             AddPage(host, "assistant", BuildAssistant());
             AddPage(host, "journal", BuildJournal());
             AddPage(host, "events", BuildEvents());
@@ -280,6 +281,7 @@ namespace Veylix
             items.Children.Add(NavItem("strategies", 0xE8FD, "Стратегии"));
             items.Children.Add(NavItem("pulse", 0xE9D2, "Network Pulse"));
             items.Children.Add(NavItem("diag", 0xE9D9, "Диагностика"));
+            items.Children.Add(NavItem("sites", 0xE774, "Сайты и DNS"));
             items.Children.Add(NavItem("assistant", 0xEA80, "Помощник"));
             items.Children.Add(NavItem("journal", 0xE7C3, "Журнал"));
             items.Children.Add(NavItem("events", 0xE81C, "События"));
@@ -438,6 +440,7 @@ namespace Veylix
                 case "events": pageTitle.Text = "События"; pageSub.Text = "Хронология и статистика текущего сеанса"; break;
                 case "assistant": pageTitle.Text = "Помощник"; pageSub.Text = "Что происходит и что с этим делать — простым языком"; break;
                 case "diag": pageTitle.Text = "Диагностика"; pageSub.Text = "Состояние приложения, процессов, сети и сервисов"; break;
+                case "sites": pageTitle.Text = "Сайты и DNS"; pageSub.Text = "Почему не открывается сайт и как это исправить"; break;
                 case "journal": pageTitle.Text = "Журнал"; pageSub.Text = "События Veylix и вывод winws.exe"; break;
                 case "updates": pageTitle.Text = "Обновления"; pageSub.Text = "Veylix и Flowseal: версии, изменения и безопасная установка"; break;
                 case "settings": pageTitle.Text = "Настройки"; pageSub.Text = "Оформление, запуск вместе с Windows и трей"; break;
@@ -447,6 +450,7 @@ namespace Veylix
             if (name == "assistant") { Analyze(); RenderAssistant(null); }
             if (name == "pulse") { RefreshPulseHeader(); foreach (PulseSeries ps in pulseMon.All.Values) DrawPulseCard(ps); }
             if (name == "strategies") RefreshLab();
+            if (name == "sites") { RefreshSiteList(); ReloadDnsState(); }
             if (name == "diag" && !diagVisited && !selfTest)
             {
                 diagVisited = true;

@@ -28,6 +28,8 @@ namespace Veylix
         public ThemeOptions Studio = new ThemeOptions();   // Theme Studio: акцент, свечение, углы, плотность, скорость
         public bool GameWatch = false;        // игровой режим: пауза обхода, пока запущена игра из списка
         public string GameWatchList = "";     // exe игр и античитов через «|»
+        public string SeenVersion = "";       // версия, о которой уже показали «Что нового»
+        public bool LoadedFromFile;           // настройки прочитаны из файла (не первая установка)
 
         public const string DefaultPinned = "check.services,diag.run,lists.user,lists.exclude,ipset.update,folder.open";
         public static readonly int[] PulseIntervals = { 30, 60, 120, 300 };
@@ -75,6 +77,7 @@ namespace Veylix
             try
             {
                 if (!File.Exists(FilePath)) return s;
+                s.LoadedFromFile = true;
                 foreach (string line in File.ReadAllLines(FilePath, Encoding.UTF8))
                 {
                     int i = line.IndexOf('=');
@@ -115,6 +118,7 @@ namespace Veylix
                 case "StudioSpeed": Studio.Speed = ThemeOptions.PickName(v, ThemeOptions.SpeedNames, "normal"); break;
                 case "GameWatch": GameWatch = v == "1" || v.Equals("true", StringComparison.OrdinalIgnoreCase); break;
                 case "GameWatchList": GameWatchList = v; break;
+                case "SeenVersion": SeenVersion = v; break;
                 default:
                     if (!extra.ContainsKey(k)) order.Add(k);
                     extra[k] = v;
@@ -156,6 +160,7 @@ namespace Veylix
             sb.Append("StudioSpeed=").Append(Studio.Speed).Append("\r\n");
             sb.Append("GameWatch=").Append(GameWatch ? "1" : "0").Append("\r\n");
             sb.Append("GameWatchList=").Append(GameWatchList).Append("\r\n");
+            sb.Append("SeenVersion=").Append(SeenVersion).Append("\r\n");
             foreach (string k in order)
                 sb.Append(k).Append('=').Append(extra[k]).Append("\r\n");
             return sb.ToString();

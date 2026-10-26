@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
@@ -73,6 +73,7 @@ namespace Veylix
                 case "check": return "Проверка";
                 case "diag": return "Диагностика";
                 case "update": return "Обновление";
+                case "dns": return "DNS";
                 case "error": return "Ошибка";
                 default: return "Событие";
             }
@@ -88,6 +89,7 @@ namespace Veylix
                 case "check": return 0xE72C;
                 case "diag": return 0xE9D9;
                 case "update": return 0xE895;
+                case "dns": return 0xE72E;
                 case "error": return 0xE783;
                 default: return 0xE946;
             }

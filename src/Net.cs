@@ -126,6 +126,7 @@ namespace Veylix
         public bool Tls;
         public bool Main;    // ключевой адрес сервиса
         public string ExpectBody;   // для HTTP без TLS: ожидаемый текст ответа (иначе это заглушка/портал авторизации)
+        public IPAddress FixedAddress;   // адрес уже известен (например, из DNS через HTTPS) — этап DNS пропускается
 
         public Target(string host, string path, bool main)
         {
@@ -281,8 +282,8 @@ namespace Veylix
             Stopwatch sw = Stopwatch.StartNew();
 
             // ---- DNS ----
-            IPAddress addr = null;
-            Task<IPAddress[]> dns = Dns.GetHostAddressesAsync(t.Host);
+            IPAddress addr = t.FixedAddress;
+            Task<IPAddress[]> dns = addr != null ? Task.FromResult(new IPAddress[] { addr }) : Dns.GetHostAddressesAsync(t.Host);
             if (!await Within(dns, to).ConfigureAwait(false))
             {
                 Fail(r, ProbeStatus.Timeout, "DNS", "DNS-сервер не ответил за " + to / 1000 + " с");
@@ -300,7 +301,7 @@ namespace Veylix
             foreach (IPAddress a in dns.Result)
                 if (a.AddressFamily == AddressFamily.InterNetwork) { addr = a; break; }
             if (addr == null && dns.Result.Length > 0) addr = dns.Result[0];
-            r.DnsMs = (int)sw.ElapsedMilliseconds;
+            r.DnsMs = t.FixedAddress != null ? -1 : (int)sw.ElapsedMilliseconds;
             if (addr == null)
             {
                 Fail(r, ProbeStatus.NetError, "DNS", "DNS не вернул ни одного адреса");

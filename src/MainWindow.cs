@@ -1,7 +1,8 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Net;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -232,6 +233,7 @@ namespace Veylix
             ShowInTaskbar = true;
             if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
             Activate();
+            if (started) MaybeShowWhatsNew();
         }
 
         void HideToTray()
@@ -240,7 +242,7 @@ namespace Veylix
             if (!trayHintShown)
             {
                 trayHintShown = true;
-                TrayBalloon("Veylix", "Работает в трее. Двойной щелчок по значку — открыть окно.", WF.ToolTipIcon.Info);
+                TrayBalloon("Veylix", "Работает в трее. Щелчок по значку — открыть окно, правый щелчок — панель.", WF.ToolTipIcon.Info);
             }
         }
 
@@ -338,6 +340,7 @@ namespace Veylix
                 if (autoMode) log.Add("info", "Запуск при входе в Windows (автозапуск).");
                 if (Settings.MigrationNote != null) log.Add("info", Settings.MigrationNote);
                 HandlePostUpdate();
+                MaybeShowWhatsNew();
                 if (!Diagnostics.IsAdmin()) log.Add("err", "Нет прав администратора — winws.exe не сможет загрузить драйвер WinDivert.");
                 List<int> ext = engine.ExternalPids();
                 if (ext.Count > 0)
@@ -677,6 +680,12 @@ namespace Veylix
                 {
                     RecordResult(during, r2[1], r2[2]);
                 }
+                bool dnsBlock = false;
+                foreach (ServiceResult s in r2)
+                    foreach (ProbeResult p in s.Probes)
+                        if (p.Stage == "DNS" && p.Status == ProbeStatus.Blocked) dnsBlock = true;
+                if (dnsBlock)
+                    log.Add("info", "Похоже на DNS-блокировку: провайдер скрывает адрес сайта, а обход это не лечит. Включите защищённый DNS в разделе «Сайты и DNS».");
                 if (!good && engine.IsRunning && r2[0].Status != ServiceStatus.NoNetwork && r2[0].Status != ServiceStatus.Unavailable)
                     log.Add("info", "Если что-то не открывается — выберите другую стратегию или запустите автоподбор.");
                 if (diagPage != null && lastDiag != null) RenderDiagnostics();
@@ -1192,7 +1201,7 @@ namespace Veylix
         public void RenderSnapshots(string dir)
         {
             Directory.CreateDirectory(dir);
-            string[] pagesToShoot = { "home", "strategies", "pulse", "diag", "assistant", "journal", "events", "updates", "settings" };
+            string[] pagesToShoot = { "home", "strategies", "pulse", "diag", "sites", "assistant", "journal", "events", "updates", "settings" };
             log.Add("ok", "Обход работает: ALT3");
             log.Add("warn", "Проверка: Discord — Частично");
             log.Add("err", "Пример ошибки для журнала");
@@ -1210,6 +1219,30 @@ namespace Veylix
             strategies[4].LastScore = 7; strategies[4].LastMax = 12; strategies[4].LastSummary = "Discord 3/3 · YouTube 1/3";
             strategies[5].LastScore = 0; strategies[5].LastMax = 12; strategies[5].LastSummary = "Discord 0/3 · YouTube 0/3";
             RefreshStrategyCards();
+
+            // «Сайты и DNS»: пример вывода — DNS-подмена плюс DPI, и результат проверки DNS
+            DnsAnswer dSys = new DnsAnswer(); dSys.Ok = true; dSys.Rcode = 3;
+            DnsAnswer dSec = new DnsAnswer(); dSec.Ok = true; dSec.Rcode = 0; dSec.Ms = 41;
+            dSec.Addresses.Add(IPAddress.Parse("104.21.32.39")); dSec.Addresses.Add(IPAddress.Parse("172.67.182.196"));
+            ProbeResult dPr = new ProbeResult();
+            dPr.Target = new Target("rutracker.org", "/", true);
+            dPr.Status = ProbeStatus.Timeout; dPr.Stage = "TLS"; dPr.Address = "104.21.32.39"; dPr.DnsMs = 0; dPr.TcpMs = 38;
+            dPr.Detail = "TLS-рукопожатие зависло — так обычно выглядит DPI-блокировка по SNI";
+            siteInput.Text = "https://rutracker.org/forum/index.php";
+            RenderSiteReport(SiteCheck.Diagnose("rutracker.org", dSys, dSec, dPr, true, null, null), null);
+            Ui.SetChip(dnsChip, "Подмена DNS", "err");
+            dnsVerdict.Text = "Провайдер подменяет DNS у 2 из 4 проверенных сайтов. Включите защищённый DNS — это уберёт блокировки такого типа.";
+            foreach (string h in DnsControlHosts)
+            {
+                bool bad = h == "rutracker.org" || h == "www.instagram.com";
+                dnsRows.Children.Add(DetailLine(h, "провайдер: " + (bad ? "домен не найден (NXDOMAIN)" : "142.250.74.14") + " · через HTTPS: 142.250.74.14", bad ? "Err" : "Text2"));
+            }
+            foreach (DohProvider dp in Doh.Providers)
+            {
+                DnsAnswer sa = new DnsAnswer(); sa.Ok = dp.Id != "quad9"; sa.Ms = dp.Id == "cloudflare" ? 34 : 52;
+                dnsSpeed[dp.Id] = sa;
+            }
+            RefreshDnsCard();
             foreach (string fam in Theme.Families)
             {
                 foreach (bool dark in new bool[] { false, true })
@@ -1269,6 +1302,34 @@ namespace Veylix
                 design.Arrange(new Rect(0, 0, DW, DH));
                 design.UpdateLayout();
                 SnapElement(gamesCard, Path.Combine(dir, "games-" + Theme.Current.Id + ".png"));
+                ShowPage("sites");
+                design.Measure(new Size(DW, DH));
+                design.Arrange(new Rect(0, 0, DW, DH));
+                design.UpdateLayout();
+                SnapElement(dnsCard, Path.Combine(dir, "dns-" + Theme.Current.Id + ".png"));
+
+                // «Что нового»: содержимое окна после обновления с 2.3.4
+                Border wn = new Border();
+                wn.Width = 520;
+                wn.Padding = new Thickness(22, 20, 22, 18);
+                wn.BorderThickness = new Thickness(1);
+                wn.SetResourceReference(Border.BackgroundProperty, "Popup");
+                wn.SetResourceReference(Border.BorderBrushProperty, "StrokeStrong");
+                wn.HorizontalAlignment = HorizontalAlignment.Left;
+                wn.VerticalAlignment = VerticalAlignment.Top;
+                StackPanel wns = new StackPanel();
+                wns.Children.Add(Theme.T("Veylix обновлён до " + Program.Version, 17, "Text", true));
+                TextBlock wnm = Theme.Wrap("Коротко о том, что изменилось:", 13, "Text2");
+                wnm.Margin = new Thickness(0, 6, 0, 14);
+                wns.Children.Add(wnm);
+                wns.Children.Add(WhatsNewContent(WhatsNew.Since("2.3.4", Program.Version, 3)));
+                wn.Child = wns;
+                design.Children.Add(wn);
+                design.Measure(new Size(DW, DH));
+                design.Arrange(new Rect(0, 0, DW, DH));
+                design.UpdateLayout();
+                SnapElement(wn, Path.Combine(dir, "whatsnew-" + Theme.Current.Id + ".png"));
+                design.Children.Remove(wn);
             }
             gamePausedFor = null;
             cfg.GameWatch = false;

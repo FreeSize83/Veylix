@@ -12,6 +12,9 @@ namespace Veylix
         bool result;
 
         VDialog(string title, string message, string details, string primary, string secondary, string kind)
+            : this(title, message, details, null, primary, secondary, kind) { }
+
+        VDialog(string title, string message, string details, FrameworkElement custom, string primary, string secondary, string kind)
         {
             Title = "Veylix";
             WindowStyle = WindowStyle.None;
@@ -74,7 +77,16 @@ namespace Veylix
             }
             g.Children.Add(body);
 
-            if (!string.IsNullOrEmpty(details))
+            if (custom != null)
+            {
+                ScrollViewer cs = Theme.Scroll(custom);
+                cs.MaxHeight = 380;
+                cs.Margin = new Thickness(46, 14, 0, 0);
+                Grid.SetRow(cs, 1);
+                Grid.SetColumnSpan(cs, 2);
+                g.Children.Add(cs);
+            }
+            else if (!string.IsNullOrEmpty(details))
             {
                 Border box = new Border();
                 box.CornerRadius = new CornerRadius(10);
@@ -145,6 +157,14 @@ namespace Veylix
         public static void Show(Window owner, string title, string message, string kind)
         {
             Run(owner, new VDialog(title, message, null, "Понятно", null, kind));
+        }
+
+        // Диалог с произвольным содержимым под текстом (например, список изменений)
+        public static void ShowContent(Window owner, string title, string message, FrameworkElement content, string primary, string kind)
+        {
+            VDialog d = new VDialog(title, message, null, content, primary, null, kind);
+            d.Width = 520;
+            Run(owner, d);
         }
 
         // Если интерфейс ещё не готов (или упал), используем стандартное окно

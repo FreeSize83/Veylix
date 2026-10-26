@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Net;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -52,6 +53,9 @@ namespace Veylix.Tests
                 Run("Стратегии и аргументы winws", TestEngine);
                 Run("Автозапуск: задание Планировщика", TestAutorun);
                 Run("Игровой режим", TestGameWatch);
+                Run("Проверка сайта", TestSiteCheck);
+                Run("Что нового после обновления", TestWhatsNew);
+                Run("DNS через HTTPS и резервная копия DNS", TestDoh);
                 Run("Вердикты сетевых проверок", TestVerdicts);
                 Run("Диагностика", TestDiagnostics);
                 Run("Команды и палитра", TestCommands);
@@ -375,6 +379,195 @@ namespace Veylix.Tests
             Check(!s.Contains("feed"), "IPv6 замаскирован");
             Check(LogStore.Redact("Bearer abcdefghijklmnop").Contains("***"), "Bearer-токен скрыт");
             Check(LogStore.Sanitize("Flowseal 1.10.3 · ALT3").Contains("1.10.3"), "номер версии не портится");
+        }
+
+        static void TestWhatsNew()
+        {
+            Eq(Program.Version, WhatsNew.Log[0].Version, "в списке изменений есть запись о текущей версии — не забудьте её перед релизом");
+            for (int i = 1; i < WhatsNew.Log.Length; i++)
+                Check(AppUpdate.Compare(WhatsNew.Log[i - 1].Version, WhatsNew.Log[i].Version) > 0, "версии в списке по убыванию: " + WhatsNew.Log[i].Version);
+            foreach (WhatsNew.Entry e in WhatsNew.Log)
+            {
+                Check(e.Items.Length > 0 && e.Items.Length <= 4, e.Version + ": от 1 до 4 пунктов");
+                foreach (string it in e.Items) Check(it.Length <= 220, e.Version + ": пункт короткий");
+            }
+
+            Check(!WhatsNew.ShouldShow("", false, "2.3.6"), "первая установка — окно не показываем");
+            Check(WhatsNew.ShouldShow("", true, "2.3.6"), "обновились с версии, где окна ещё не было");
+            Check(WhatsNew.ShouldShow("2.3.4", true, "2.3.6"), "обновились");
+            Check(!WhatsNew.ShouldShow("2.3.6", true, "2.3.6"), "уже видели");
+            Check(!WhatsNew.ShouldShow("2.3.7", true, "2.3.6"), "откат на старую версию — молчим");
+
+            List<WhatsNew.Entry> l = WhatsNew.Since("2.3.4", "2.3.6", 3);
+            Eq(2, l.Count, "2.3.4 → 2.3.6: две версии");
+            Eq("2.3.6", l[0].Version, "новая сверху");
+            Eq("2.3.5", l[1].Version, "затем предыдущая");
+            Eq(3, WhatsNew.Since("2.2.0", "2.3.6", 3).Count, "давно не обновлялись — не больше трёх версий");
+            l = WhatsNew.Since("", "2.3.6", 3);
+            Check(l.Count == 1 && l[0].Version == "2.3.6", "версия до окна неизвестна — только текущая");
+            Eq(0, WhatsNew.Since("2.3.6", "2.3.6", 3).Count, "та же версия — пусто");
+            Check(WhatsNew.Since("2.3.5", "2.3.5", 3).Count == 0 && WhatsNew.Recent("2.3.5", 3)[0].Version == "2.3.5", "записи новее текущей не показываются");
+            Eq(3, WhatsNew.Recent(Program.Version, 3).Count, "«Что нового» из палитры — три последние версии");
+
+            Settings st = Settings.Load();
+            st.SeenVersion = "2.3.6";
+            Eq(null, st.Save(), "сохранение увиденной версии");
+            Settings st2 = Settings.Load();
+            Eq("2.3.6", st2.SeenVersion, "увиденная версия сохраняется");
+            Check(st2.LoadedFromFile, "настройки прочитаны из файла");
+            st2.SeenVersion = "";
+            st2.Save();
+        }
+
+        static void TestSiteCheck()
+        {
+            Eq("rutracker.org", SiteCheck.NormalizeHost("https://RuTracker.org/forum/index.php?t=1"), "адрес из браузера");
+            Eq("www.youtube.com", SiteCheck.NormalizeHost("  www.youtube.com:443/watch "), "порт и путь");
+            Eq("example.com", SiteCheck.NormalizeHost("user:pass@example.com"), "логин в адресе");
+            Eq("example.com", SiteCheck.NormalizeHost("*.example.com."), "маска и точка в конце");
+            Eq("xn--d1acpjx3f.xn--p1ai", SiteCheck.NormalizeHost("яндекс.рф"), "кириллический домен → punycode");
+            Eq(null, SiteCheck.NormalizeHost("localhost"), "без точки — не сайт");
+            Eq(null, SiteCheck.NormalizeHost("1.2.3.4"), "IP-адрес — не домен");
+            Eq(null, SiteCheck.NormalizeHost("exa mple.com"), "пробел в имени");
+            Eq(null, SiteCheck.NormalizeHost(""), "пусто");
+            Eq("youtube.com", SiteCheck.ListEntry("www.youtube.com"), "www. убирается для списка");
+            Eq("www.com", SiteCheck.ListEntry("www.com"), "www.com не обрезается");
+
+            List<string> e = SiteCheck.ParseEntries(new string[] { "# Never leave this file empty", "domain.example.abc", "YouTube.com", "", "discord.gg", "youtube.com" });
+            Eq(2, e.Count, "комментарии, заглушка и дубли пропускаются");
+            Eq("youtube.com", SiteCheck.FindCovering(e, "i.ytimg.youtube.com"), "поддомен покрывается");
+            Eq("youtube.com", SiteCheck.FindCovering(e, "youtube.com"), "сам домен");
+            Eq(null, SiteCheck.FindCovering(e, "notyoutube.com"), "похожее имя не покрывается");
+
+            string dir = Path.Combine(Path.GetTempPath(), "veylix-sites-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            try
+            {
+                string f = Path.Combine(dir, SiteCheck.UserListFile);
+                File.WriteAllText(f, "# Never leave this file empty\r\ndomain.example.abc");
+                Check(SiteCheck.AddEntry(f, "rutracker.org"), "домен добавлен");
+                Check(!SiteCheck.AddEntry(f, "rutracker.org"), "повторно не добавляется");
+                Check(File.ReadAllText(f).Contains("domain.example.abc\r\nrutracker.org\r\n"), "запись с новой строки");
+                string file;
+                Eq("rutracker.org", SiteCheck.FindInFiles(dir, SiteCheck.IncludeFiles, "www.rutracker.org", out file), "поиск по спискам");
+                Eq(SiteCheck.UserListFile, file, "найден в моём списке");
+                Check(SiteCheck.RemoveEntry(f, "rutracker.org"), "домен убран");
+                Check(File.ReadAllText(f).Contains("domain.example.abc"), "файл не остался пустым");
+                File.WriteAllText(f, "only.example.com\r\n");
+                Check(SiteCheck.RemoveEntry(f, "only.example.com"), "последний домен убран");
+                Check(File.ReadAllText(f).Contains(SiteCheck.Placeholder), "заглушка возвращена, файл не пустой");
+                Check(!SiteCheck.RemoveEntry(Path.Combine(dir, "нет.txt"), "a.com"), "файла нет — ничего не делаем");
+            }
+            finally { try { Directory.Delete(dir, true); } catch { } }
+
+            DnsAnswer nx = new DnsAnswer(); nx.Ok = true; nx.Rcode = 3;
+            DnsAnswer real = new DnsAnswer(); real.Ok = true; real.Rcode = 0; real.Addresses.Add(IPAddress.Parse("104.21.32.39"));
+            DnsAnswer stub = new DnsAnswer(); stub.Ok = true; stub.Rcode = 0; stub.Addresses.Add(IPAddress.Parse("127.0.0.1"));
+            DnsAnswer down = new DnsAnswer(); down.Error = "нет ответа";
+            Check(Doh.LooksPoisoned(nx, real), "NXDOMAIN у провайдера при живом домене — подмена");
+            Check(Doh.LooksPoisoned(stub, real), "адрес-заглушка — подмена");
+            Check(!Doh.LooksPoisoned(real, real), "одинаковые ответы — подмены нет");
+            Check(!Doh.LooksPoisoned(nx, down), "DoH не ответил — судить нельзя");
+            Check(!Doh.LooksPoisoned(down, real), "системный DNS не ответил — это не подмена");
+
+            ProbeResult ok = new ProbeResult(); ok.Status = ProbeStatus.Ok; ok.Stage = "HTTP"; ok.Detail = "ответ HTTP 200";
+            ProbeResult tls = new ProbeResult(); tls.Status = ProbeStatus.Timeout; tls.Stage = "TLS"; tls.Detail = "зависло";
+            ProbeResult cut = new ProbeResult(); cut.Status = ProbeStatus.Partial; cut.Stage = "HTTP"; cut.Detail = "обрыв на 16 КБ";
+            ProbeResult tcp = new ProbeResult(); tcp.Status = ProbeStatus.Timeout; tcp.Stage = "TCP"; tcp.Detail = "таймаут"; tcp.Address = "1.2.3.4";
+            ProbeResult bad = new ProbeResult(); bad.Status = ProbeStatus.NetError; bad.Stage = "TCP"; bad.Detail = "сервер отклонил подключение";
+
+            SiteReport r = SiteCheck.Diagnose("a.com", real, real, ok, false, null, null);
+            Eq("ok", r.Level, "сайт открывается");
+            Check(!r.OfferAdd && !r.OfferDnsFix, "ничего не предлагаем");
+            r = SiteCheck.Diagnose("a.com", nx, real, ok, false, null, null);
+            Eq("warn", r.Level, "только DNS-блокировка");
+            Check(r.OfferDnsFix && !r.OfferAdd, "предлагаем защищённый DNS");
+            r = SiteCheck.Diagnose("a.com", real, real, tls, true, null, null);
+            Check(r.OfferAdd, "DPI, домена нет в списках — добавить");
+            r = SiteCheck.Diagnose("a.com", real, real, cut, false, "a.com", null);
+            Check(r.OfferStart && !r.OfferAdd, "домен в списке, обход выключен — включить");
+            r = SiteCheck.Diagnose("a.com", real, real, tls, true, "a.com", null);
+            Check(r.OfferStrategy, "домен в обходе, но не помогает — другая стратегия");
+            r = SiteCheck.Diagnose("a.com", real, real, tls, true, "a.com", "a.com");
+            Check(!r.OfferAdd && !r.OfferStart && r.Text.Contains("исключений"), "домен в исключениях — объясняем");
+            r = SiteCheck.Diagnose("a.com", nx, real, tls, true, null, null);
+            Check(r.OfferAdd && r.OfferDnsFix, "DNS-подмена и DPI вместе — оба совета");
+            r = SiteCheck.Diagnose("a.com", real, real, tcp, true, null, null);
+            Check(!r.OfferAdd && r.Title.Contains("не отвечает"), "блокировка по IP — домен добавлять бесполезно");
+            r = SiteCheck.Diagnose("a.com", real, real, bad, true, null, null);
+            Eq("Сайт ответил ошибкой", r.Title, "отказ сервера — не блокировка");
+            r = SiteCheck.Diagnose("nonexistent.example", nx, nx, null, true, null, null);
+            Eq("Такого домена нет", r.Title, "домена нет нигде");
+            r = SiteCheck.Diagnose("a.com", down, down, null, true, null, null);
+            Check(r.Title.Contains("адрес"), "DNS не ответил вообще");
+        }
+
+        static void TestDoh()
+        {
+            byte[] q = Doh.BuildQuery("www.youtube.com");
+            Eq(33, q.Length, "длина запроса");
+            Eq(1, (int)q[2], "флаг рекурсии");
+            Eq(3, (int)q[12], "длина первой метки");
+            Eq("AAABAAABAAAAAAAAA3d3dwd5b3V0dWJlA2NvbQAAAQAB", Doh.Base64Url(q), "base64url без «=»");
+            Check(Doh.Base64Url(new byte[] { 0xFB, 0xFF }).IndexOfAny(new char[] { '+', '/', '=' }) < 0, "в base64url нет +, / и =");
+
+            // ответ: вопрос, CNAME со ссылкой на имя, затем A-запись
+            List<byte> m = new List<byte>(q);
+            m[2] = 0x81; m[3] = 0x80;
+            m[7] = 2;
+            m.AddRange(new byte[] { 0xC0, 12, 0, 5, 0, 1, 0, 0, 0, 60, 0, 4, 1, 1, 0xC0, 12 });
+            m.AddRange(new byte[] { 0xC0, 12, 0, 1, 0, 1, 0, 0, 0, 60, 0, 4, 142, 250, 74, 14 });
+            DnsAnswer a = Doh.ParseResponse(m.ToArray());
+            Check(a.Ok, "ответ разобран");
+            Eq(0, a.Rcode, "код ответа");
+            Eq(1, a.Addresses.Count, "только A-записи");
+            Eq("142.250.74.14", a.Addresses[0].ToString(), "адрес");
+
+            byte[] nx = (byte[])q.Clone();
+            nx[3] = 0x83;
+            DnsAnswer n = Doh.ParseResponse(nx);
+            Check(n.NxDomain && !n.HasAddress, "NXDOMAIN");
+            Eq("домен не найден (NXDOMAIN)", n.Describe(), "описание NXDOMAIN");
+            bool threw = false;
+            try { Doh.ParseResponse(new byte[] { 0, 0, 0x81, 0x80, 0, 1, 0, 1, 0, 0, 0, 0, 3, 119 }); } catch (InvalidDataException) { threw = true; }
+            Check(threw, "обрезанный ответ — ошибка, а не мусор");
+
+            Check(Doh.IsStub(IPAddress.Parse("0.0.0.0")) && Doh.IsStub(IPAddress.Parse("10.10.34.35")) && Doh.IsStub(IPAddress.Parse("169.254.1.1")), "заглушки");
+            Check(!Doh.IsStub(IPAddress.Parse("142.250.74.14")), "обычный адрес");
+            Eq("google", Doh.ByServers(new string[] { "192.168.1.1", "8.8.4.4" }).Id, "сервис по адресу DNS");
+            Check(Doh.ByServers(new string[] { "192.168.1.1" }) == null, "DNS роутера — не сервис");
+            foreach (DohProvider p in Doh.Providers)
+                Check(p.QueryUrl.StartsWith("https://" + p.V4[0] + "/"), p.Title + ": запрос идёт по IP, без системного DNS");
+
+            List<AdapterDns> list = new List<AdapterDns>();
+            AdapterDns e = new AdapterDns(); e.Index = 12; e.Name = "Ethernet"; e.HasV6 = true;
+            list.Add(e);
+            AdapterDns w = new AdapterDns(); w.Index = 7; w.Name = "Беспроводная | сеть"; w.Dhcp4 = false; w.Servers4.Add("192.168.0.1"); w.Servers4.Add("77.88.8.8"); w.HasV6 = false;
+            list.Add(w);
+            string text = DnsFix.Serialize("cloudflare", list);
+            string id;
+            List<AdapterDns> back = DnsFix.Deserialize(text, out id);
+            Eq("cloudflare", id, "сервис сохраняется");
+            Eq(2, back.Count, "оба подключения");
+            Check(back[0].Dhcp4 && back[0].HasV6 && back[0].Dhcp6, "DHCP сохраняется");
+            Check(!back[1].Dhcp4 && back[1].Servers4.Count == 2 && back[1].Servers4[1] == "77.88.8.8", "ручные адреса сохраняются");
+            Check(!back[1].HasV6, "без IPv6");
+            Eq("Беспроводная   сеть", back[1].Name, "«|» в имени не ломает формат");
+            Eq(0, DnsFix.Deserialize("мусор\r\nAdapter=x|dhcp|dhcp", out id).Count, "битая строка пропускается");
+
+            string ru = "Параметры шифрования для 8.8.8.8 \r\n------------------------------\r\nШаблон DNS по протоколу HTTPS     : https://dns.google/dns-query\r\nАвтоматическое обновление                : yes\r\nРезерв UDP                : no\r\n";
+            Check(DnsFix.ParseAutoUpgrade(ru), "netsh на русском: шифрование включено");
+            Check(!DnsFix.ParseAutoUpgrade(ru.Replace(": yes", ": no")), "netsh: шифрование выключено");
+            string en = "Encryption settings for 1.1.1.1\n---------\nDNS-over-HTTPS template : https://cloudflare-dns.com/dns-query\nAuto-upgrade : yes\nUDP-fallback : yes\n";
+            Check(DnsFix.ParseAutoUpgrade(en), "netsh на английском");
+            Check(!DnsFix.ParseAutoUpgrade("The specified server was not found."), "сервера нет в списке");
+            Check(DnsFix.IsVirtual("Radmin VPN Famatech Radmin VPN Ethernet Adapter"), "Radmin VPN не трогаем");
+            Check(DnsFix.IsVirtual("ZeroTier One [abc] ZeroTier Virtual Port"), "ZeroTier не трогаем");
+            Check(!DnsFix.IsVirtual("Ethernet Realtek PCIe GbE Family Controller"), "обычная сетевая карта");
+            Check(!DnsFix.IsVirtual("Беспроводная сеть Intel(R) Wi-Fi 6 AX201 160MHz"), "Wi-Fi");
+            DnsAnswer sysDown = new DnsAnswer(); sysDown.Error = "DNS-сервер не ответил за 6 с";
+            DnsAnswer secNx = new DnsAnswer(); secNx.Ok = true; secNx.Rcode = 3;
+            Eq("Такого домена нет", SiteCheck.Diagnose("nonexistent.example", sysDown, secNx, null, false, null, null).Title, "DoH: NXDOMAIN, системный молчит — домена нет");
         }
 
         static void TestGameWatch()

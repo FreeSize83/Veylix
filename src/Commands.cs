@@ -137,6 +137,7 @@ namespace Veylix
             Cmd("page.strategies", nav, 0xE8FD, "Открыть стратегии", "Ctrl+2", delegate { Page("strategies"); }).Keywords = "лаборатория стратегий lab";
             Cmd("page.pulse", nav, 0xE9D2, "Открыть Network Pulse", "Ctrl+3", delegate { Page("pulse"); }).Keywords = "пульс сети задержка монитор";
             Cmd("page.diag", nav, 0xE9D9, "Открыть диагностику", "Ctrl+4", delegate { Page("diag"); });
+            Cmd("page.sites", nav, 0xE774, "Открыть «Сайты и DNS»", "Ctrl+9", delegate { Page("sites"); }).Keywords = "сайт не открывается домен dns днс";
             Cmd("page.journal", nav, 0xE7C3, "Открыть журнал", "Ctrl+5", delegate { Page("journal"); }).Keywords = "лог логи log";
             Cmd("page.events", nav, 0xE81C, "Открыть историю событий", "Ctrl+6", delegate { Page("events"); }).Keywords = "события сеанс статистика таймлайн";
             Cmd("page.updates", nav, 0xE895, "Открыть обновления", "Ctrl+7", delegate { Page("updates"); });
@@ -180,6 +181,12 @@ namespace Veylix
             });
             gw.DynamicTitle = delegate { return cfg.GameWatch ? "Выключить игровой режим" : "Включить игровой режим"; };
             gw.Keywords = "игры античит vanguard valorant faceit пауза";
+            AppCommand site = Cmd("site.check", chk, 0xE721, "Проверить сайт…", null, delegate { Page("sites"); siteInput.Focus(); });
+            site.Keywords = "не открывается сайт домен добавить в обход список";
+            site.Short = "Проверить сайт";
+            AppCommand dns = Cmd("dns.check", chk, 0xE72E, "Проверить DNS на подмену", null, delegate { Page("sites"); RunDnsCheck(); });
+            dns.Unavailable = delegate { return dnsBusy ? "проверка DNS уже идёт" : null; };
+            dns.Keywords = "днс doh https защищённый cloudflare google блокировка";
             AppCommand diag = Cmd("diag.run", chk, 0xE9D9, "Запустить диагностику", "Ctrl+D", delegate { Page("diag"); RunDiagnostics(); });
             diag.Unavailable = delegate { return diagRunning ? "диагностика уже идёт" : null; };
             diag.Short = "Диагностика";
@@ -199,6 +206,11 @@ namespace Veylix
                 if (!appLatest.CanInstall) return appLatest.Problem;
                 return null;
             };
+            Cmd("app.whatsnew", chk, 0xE789, "Что нового в Veylix", null, delegate
+            {
+                if (!IsVisible) ShowFromTray();
+                ShowWhatsNew(WhatsNew.Recent(Program.Version, 3), false);
+            }).Keywords = "изменения changelog версия новое обновление";
             AppCommand upd = Cmd("updates.check", chk, 0xE895, "Проверить обновления Flowseal", "Ctrl+U", delegate { Page("updates"); CheckUpdatesCommand(); });
             upd.Unavailable = delegate { return updating ? "идёт обновление" : null; };
             upd.Short = "Обновления";
