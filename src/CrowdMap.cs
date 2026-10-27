@@ -227,6 +227,7 @@ namespace Veylix
         TextBlock crowdWhere, crowdStatus;
         Border crowdOutage;
         TextBlock crowdOutageText;
+        Card crowdCard;
 
         FrameworkElement BuildCrowdCard()
         {
@@ -284,6 +285,7 @@ namespace Veylix
             Grid.SetRow(bottom, 2);
             g.Children.Add(bottom);
             c.Content = g;
+            crowdCard = c;
             RenderCrowd();
             return c;
         }
@@ -352,6 +354,28 @@ namespace Veylix
                 no.Click += delegate { SetCrowdShare(false); };
                 bs.Children.Add(no);
                 crowdAsk.Children.Add(bs);
+            }
+            else
+            {
+                // выбор сделан — показываем его и даём передумать прямо здесь, без поиска по настройкам
+                bool on = cfg.CrowdShare == 1;
+                Grid row = new Grid();
+                row.ColumnDefinitions.Add(Theme.Col(0));
+                row.ColumnDefinitions.Add(Theme.Col(-1));
+                StackPanel st = Theme.Row();
+                st.VerticalAlignment = VerticalAlignment.Center;
+                TextBlock ic = Theme.Icon(on ? 0xE73E : 0xE711, 10, on ? "Ok" : "Text3");
+                ic.Margin = new Thickness(0, 1, 6, 0);
+                st.Children.Add(ic);
+                st.Children.Add(Theme.T(on ? "Вы делитесь результатами" : "Вы не делитесь результатами", 11.5, "Text2", false));
+                row.Children.Add(st);
+                VButton change = LinkButton(on ? "Не делиться" : "Делиться");
+                change.Margin = new Thickness(0, -4, -8, -4);
+                change.ToolTip = on ? "Перестать отправлять результаты проверок на карту" : "Анонимно отправлять название стратегии и «работает / нет»";
+                change.Click += delegate { SetCrowdShare(!on); };
+                Grid.SetColumn(change, 1);
+                row.Children.Add(change);
+                crowdAsk.Children.Add(row);
             }
         }
 

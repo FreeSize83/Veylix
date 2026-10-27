@@ -11,12 +11,12 @@ set "REFS=/lib:"%FW%\WPF" /r:PresentationCore.dll /r:PresentationFramework.dll /
 
 if not exist dist mkdir dist
 echo Сборка Veylix.exe ...
-"%FW%\csc.exe" /nologo /codepage:65001 /target:winexe /optimize+ /out:dist\Veylix.exe /win32icon:Veylix.ico /win32manifest:Veylix.manifest /resource:zapret.zip,zapret.zip %REFS% src\*.cs
+"%FW%\csc.exe" /nologo /codepage:65001 /target:winexe /optimize+ /out:dist\Veylix.exe /win32icon:Veylix.ico /win32manifest:Veylix.manifest /resource:zapret.zip,zapret.zip /resource:presets\apps.json,apps.json %REFS% src\*.cs
 if errorlevel 1 goto fail
 
 if /i "%~1"=="test" (
   echo Сборка и запуск тестов ...
-  "%FW%\csc.exe" /nologo /codepage:65001 /target:exe /out:dist\VeylixTests.exe /main:Veylix.Tests.TestProgram /win32manifest:tests\tests.manifest /resource:zapret.zip,zapret.zip %REFS% src\*.cs tests\*.cs
+  "%FW%\csc.exe" /nologo /codepage:65001 /target:exe /out:dist\VeylixTests.exe /main:Veylix.Tests.TestProgram /win32manifest:tests\tests.manifest /resource:zapret.zip,zapret.zip /resource:presets\apps.json,apps.json %REFS% src\*.cs tests\*.cs
   if errorlevel 1 goto fail
   dist\VeylixTests.exe
   if errorlevel 1 goto fail

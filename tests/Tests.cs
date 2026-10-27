@@ -59,6 +59,7 @@ namespace Veylix.Tests
                 Run("Обратная связь", TestFeedback);
                 Run("Значок трея и мини-виджет", TestTrayAndWidget);
                 Run("Народная карта стратегий", TestCrowdMap);
+                Run("Игры и приложения", TestAppPresets);
                 Run("DNS через HTTPS и резервная копия DNS", TestDoh);
                 Run("Вердикты сетевых проверок", TestVerdicts);
                 Run("Диагностика", TestDiagnostics);
@@ -382,6 +383,81 @@ namespace Veylix.Tests
             Check(!s.Contains("feed"), "IPv6 замаскирован");
             Check(LogStore.Redact("Bearer abcdefghijklmnop").Contains("***"), "Bearer-токен скрыт");
             Check(LogStore.Sanitize("Flowseal 1.10.3 · ALT3").Contains("1.10.3"), "номер версии не портится");
+        }
+
+        static void TestAppPresets()
+        {
+            AppPresets.Catalog c = AppPresets.Embedded();
+            Check(c.Presets.Count >= 10, "встроено не меньше 10 наборов: " + c.Presets.Count);
+            Check(c.Version >= 1 && c.Updated.Length == 10, "версия и дата наборов");
+            // каждый домен из файла прошёл проверку — ни один не отброшен молча
+            Dictionary<string, object> rawJson;
+            using (Stream st = typeof(AppPresets).Assembly.GetManifestResourceStream("apps.json"))
+            using (StreamReader r = new StreamReader(st, Encoding.UTF8))
+                rawJson = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<Dictionary<string, object>>(r.ReadToEnd());
+            int rawCount = 0;
+            foreach (object o in (System.Collections.IEnumerable)rawJson["presets"])
+                rawCount += ((System.Collections.ICollection)((Dictionary<string, object>)o)["domains"]).Count;
+            int parsed = 0;
+            foreach (AppPresets.Preset p in c.Presets)
+            {
+                parsed += p.Domains.Count;
+                Check(p.Note.Length > 0 && p.Note.Length <= 200, p.Id + ": есть короткое пояснение");
+                Check(AppPresets.GroupTitle(p.Group) != "Другое", p.Id + ": известная группа");
+                foreach (string d in p.Domains) Check(!d.StartsWith("www."), p.Id + ": домен без www. (" + d + ")");
+            }
+            Eq(rawCount, parsed, "все домены из apps.json приняты");
+            Check(c.Find("roblox") != null && c.Find("telegram") != null && c.Find("steam") != null, "есть Roblox, Telegram и Steam");
+            Check(c.Find("roblox").Domains.Contains("roblox.com"), "Roblox: roblox.com");
+
+            AppPresets.Catalog bad = AppPresets.Parse("{\"version\":2,\"presets\":[{\"id\":\"ok\",\"title\":\"Ok\",\"group\":\"games\",\"note\":\"n\",\"domains\":[\"good.com\",\"bad domain\",\"1.2.3.4\",\"GOOD.com\"]}," +
+                "{\"id\":\"Bad Id\",\"title\":\"x\",\"domains\":[\"a.com\"]},{\"id\":\"empty\",\"title\":\"E\",\"domains\":[\"\"]},{\"id\":\"ok\",\"title\":\"dup\",\"domains\":[\"d.com\"]}]}");
+            Eq(1, bad.Presets.Count, "неверные наборы и дубли отброшены");
+            Eq(1, bad.Presets[0].Domains.Count, "неверные домены и повторы отброшены");
+            bool threw = false;
+            try { AppPresets.Parse("{\"presets\":[]}"); } catch (InvalidDataException) { threw = true; }
+            Check(threw, "пустой файл не принимается — остаются прежние наборы");
+
+            List<string> sel = AppPresets.Selected("roblox|telegram||roblox|BAD id");
+            Eq(2, sel.Count, "выбранные наборы: без дублей и мусора");
+            List<string> dom = AppPresets.DomainsFor(c, new string[] { "roblox", "telegram", "unknown" });
+            Check(dom.Contains("rbxcdn.com") && dom.Contains("t.me"), "домены выбранных наборов");
+            List<string> sorted = new List<string>(dom); sorted.Sort(StringComparer.Ordinal);
+            Eq(string.Join("|", sorted.ToArray()), string.Join("|", dom.ToArray()), "домены отсортированы — блок не меняется без причины");
+
+            string user = "# Never leave this file empty\r\nmy.site.com\r\nother.org\r\n";
+            string t1 = AppPresets.WriteBlock(user, new List<string> { "a.com", "b.com" });
+            Check(t1.StartsWith(user.TrimEnd() + "\r\n" + AppPresets.BlockStart), "блок добавляется в конец, свои домены на месте");
+            Eq("a.com|b.com", string.Join("|", AppPresets.ReadBlock(t1).ToArray()), "блок читается");
+            string t2 = AppPresets.WriteBlock(t1, new List<string> { "c.com" });
+            Eq("c.com", string.Join("|", AppPresets.ReadBlock(t2).ToArray()), "блок заменяется, а не дописывается");
+            Check(t2.Contains("my.site.com") && t2.Contains("other.org") && !t2.Contains("a.com"), "свои домены не тронуты");
+            string t3 = AppPresets.WriteBlock(t2, new List<string>());
+            Check(!t3.Contains(AppPresets.BlockStart) && t3.Contains("other.org"), "все наборы выключены — блок убран");
+            string t4 = AppPresets.WriteBlock("", new List<string>());
+            Check(t4.Contains(SiteCheck.Placeholder), "файл не остаётся пустым");
+
+            string dir = Path.Combine(Path.GetTempPath(), "veylix-presets-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
+            try
+            {
+                string f = Path.Combine(dir, SiteCheck.UserListFile);
+                File.WriteAllText(f, AppPresets.WriteBlock("mine.com\r\n", new List<string> { "roblox.com", "mine.com" }));
+                List<string> own = SiteCheck.ReadUserEntries(f);
+                Check(own.Count == 1 && own[0] == "mine.com", "в «Моих доменах» нет доменов из наборов");
+                string file;
+                Eq("roblox.com", SiteCheck.FindInFiles(dir, SiteCheck.IncludeFiles, "www.roblox.com", out file), "домены наборов учитываются при проверке сайта");
+                Check(SiteCheck.RemoveEntry(f, "mine.com"), "свой домен удаляется");
+                Check(AppPresets.ReadBlock(File.ReadAllText(f)).Contains("mine.com"), "а такой же домен в блоке наборов остаётся");
+            }
+            finally { try { Directory.Delete(dir, true); } catch { } }
+
+            Settings stt = Settings.Load();
+            stt.AppPresets = "roblox|telegram";
+            stt.Save();
+            Eq("roblox|telegram", Settings.Load().AppPresets, "выбранные наборы сохраняются");
+            stt.AppPresets = "";
+            stt.Save();
         }
 
         static string CrowdJson(int rn, int rb, int rd, int ry, int en, int eb, int ed, int ey)

@@ -10,7 +10,7 @@ namespace Veylix
 {
     public static class Program
     {
-        public const string Version = "2.3.9";
+        public const string Version = "2.3.10";
 
         const string MutexName = "Global\\VeylixLauncher_v2";
         const string LegacyMutexName = "Global\\BeeBotLauncher_v1";

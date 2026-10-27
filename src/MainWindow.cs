@@ -142,7 +142,7 @@ namespace Veylix
                 if (++ticks % 15 == 0) RefreshMap();
                 if (ticks % 2 == 0) CheckGames();
                 if (ticks % 30 == 0) CheckThemeSchedule();
-                if (ticks % 1800 == 0) LoadCrowd(true);
+                if (ticks % 1800 == 0) { LoadCrowd(true); SyncPresets(); }
             };
             timer.Start();
 
@@ -409,6 +409,7 @@ namespace Veylix
                 if (autoMode && !DeferStartForGame(selected)) await AutoStartBypass();
                 if (cfg.WidgetOn && !selfTest) ShowWidget();
                 LoadCrowd(false);   // сигнал о массовом сбое у провайдера — и при запуске в трее
+                SyncPresets();      // свежие наборы «Игры и приложения»
                 if (engine.CheckUpdatesEnabled) await CheckUpdates(false);
                 if (cfg.AppUpdateCheck && Program.PostUpdatePlan == null) CheckAppUpdate(false);
             }
@@ -1287,6 +1288,8 @@ namespace Veylix
                 "\"recent\":{\"n\":14,\"both\":3,\"discord\":4,\"youtube\":12},\"earlier\":{\"n\":92,\"both\":65,\"discord\":80,\"youtube\":74}}");
             crowd.Fetched = new DateTime(2026, 10, 27, 14, 5, 0);
             RenderCrowd();
+            cfg.AppPresets = "roblox|telegram|riot";
+            RenderPresets();
             strategies[5].LastScore = 0; strategies[5].LastMax = 12; strategies[5].LastSummary = "Discord 0/3 · YouTube 0/3";
             RefreshStrategyCards();
 
@@ -1390,6 +1393,17 @@ namespace Veylix
                 fbText.Text = "";
                 fbContact.Text = "";
                 tgFbReport.IsOn = false;
+
+                // народная карта после отказа делиться: виден выбор и ссылка, чтобы передумать
+                ShowPage("strategies");
+                cfg.CrowdShare = 2;
+                RenderCrowd();
+                design.Measure(new Size(DW, DH));
+                design.Arrange(new Rect(0, 0, DW, DH));
+                design.UpdateLayout();
+                SnapElement(crowdCard, Path.Combine(dir, "crowd-declined-" + Theme.Current.Id + ".png"));
+                cfg.CrowdShare = 0;
+                RenderCrowd();
 
                 // мини-виджет: содержимое окна в рабочем состоянии
                 Border wb = new Border();

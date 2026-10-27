@@ -303,6 +303,26 @@ namespace Veylix
             return null;
         }
 
+        // Свои домены пользователя — без блока наборов «Игры и приложения»
+        public static List<string> ReadUserEntries(string path)
+        {
+            try
+            {
+                if (!File.Exists(path)) return new List<string>();
+                List<string> lines = new List<string>();
+                bool inside = false;
+                foreach (string l in File.ReadAllLines(path))
+                {
+                    string t = l.Trim();
+                    if (t == AppPresets.BlockStart) { inside = true; continue; }
+                    if (t == AppPresets.BlockEnd) { inside = false; continue; }
+                    if (!inside) lines.Add(l);
+                }
+                return ParseEntries(lines);
+            }
+            catch { return new List<string>(); }
+        }
+
         public static List<string> ReadEntries(string path)
         {
             try { return File.Exists(path) ? ParseEntries(File.ReadAllLines(path)) : new List<string>(); }
@@ -337,10 +357,14 @@ namespace Veylix
         {
             if (!File.Exists(path)) return false;
             List<string> keep = new List<string>();
-            bool removed = false;
+            bool removed = false, inside = false;
             foreach (string l in File.ReadAllLines(path))
             {
-                if (string.Equals(l.Trim(), entry, StringComparison.OrdinalIgnoreCase)) { removed = true; continue; }
+                string t = l.Trim();
+                if (t == AppPresets.BlockStart) inside = true;
+                else if (t == AppPresets.BlockEnd) inside = false;
+                // блок наборов не трогаем — им управляют галочки «Игры и приложения»
+                else if (!inside && string.Equals(t, entry, StringComparison.OrdinalIgnoreCase)) { removed = true; continue; }
                 keep.Add(l);
             }
             if (!removed) return false;

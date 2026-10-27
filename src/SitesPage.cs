@@ -34,6 +34,7 @@ namespace Veylix
         {
             StackPanel sp = new StackPanel();
             sp.Margin = new Thickness(0, 0, 8, 0);
+            sp.Children.Add(BuildPresetsCard());
 
             // ---- проверка сайта ----
             Card c1 = new Card(22);
@@ -378,7 +379,7 @@ namespace Veylix
         {
             if (siteMyList == null) return;
             siteMyList.Children.Clear();
-            List<string> list = SiteCheck.ReadEntries(Path.Combine(engine.Lists, SiteCheck.UserListFile));
+            List<string> list = SiteCheck.ReadUserEntries(Path.Combine(engine.Lists, SiteCheck.UserListFile));
             if (list.Count == 0)
             {
                 TextBlock empty = Theme.Wrap("Пока пусто. Проверьте сайт выше — если его блокирует DPI, Veylix предложит добавить домен сюда.", 12, "Text3");
