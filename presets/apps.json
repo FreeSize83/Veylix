@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "updated": "2026-10-27",
+  "about": "Наборы доменов для «Игры и приложения» в Veylix. Veylix скачивает этот файл раз в 12 часов; правки здесь доходят до всех пользователей без новой версии программы. Домен действует и на поддомены.",
+  "presets": [
+    {
+      "id": "telegram", "title": "Telegram", "group": "apps",
+      "note": "Сайт, веб-версия, загрузка медиа. Звонки и часть медиа идут по IP-адресам — для них может понадобиться IPSet «Все адреса».",
+      "domains": ["telegram.org", "t.me", "telegram.me", "telegra.ph", "telesco.pe", "cdn-telegram.org", "telegram-cdn.org", "tdesktop.com", "graph.org", "comments.app", "contest.com", "fragment.com", "tg.dev", "usercontent.dev"]
+    },
+    {
+      "id": "whatsapp", "title": "WhatsApp", "group": "apps",
+      "note": "Сайт, веб-версия и приложение для ПК.",
+      "domains": ["whatsapp.com", "whatsapp.net", "wa.me", "whatsapp.biz"]
+    },
+    {
+      "id": "twitch", "title": "Twitch", "group": "media",
+      "note": "Сайт, трансляции и чат.",
+      "domains": ["twitch.tv", "ttvnw.net", "jtvnw.net", "twitchcdn.net", "twitchsvc.net", "live-video.net", "ext-twitch.tv"]
+    },
+    {
+      "id": "soundcloud", "title": "SoundCloud", "group": "media",
+      "note": "Сайт и воспроизведение.",
+      "domains": ["soundcloud.com", "sndcdn.com"]
+    },
+    {
+      "id": "instagram", "title": "Instagram и Facebook", "group": "media",
+      "note": "Часть сервисов Meta блокируется по IP — тогда поможет только VPN.",
+      "domains": ["instagram.com", "cdninstagram.com", "facebook.com", "fbcdn.net", "fb.com", "fbsbx.com"]
+    },
+    {
+      "id": "x", "title": "X (Twitter)", "group": "media",
+      "note": "Часть адресов блокируется по IP — тогда поможет только VPN.",
+      "domains": ["x.com", "twitter.com", "twimg.com", "t.co"]
+    },
+    {
+      "id": "roblox", "title": "Roblox", "group": "games",
+      "note": "Вход, сайт, загрузка игр и аватаров. Для серверов игры включите «Игровой фильтр» на главной.",
+      "domains": ["roblox.com", "rbxcdn.com", "rbx.com", "robloxlabs.com"]
+    },
+    {
+      "id": "riot", "title": "League of Legends и Valorant", "group": "games",
+      "note": "Riot Client, вход, лаунчер и патчи. Для самой игры включите «Игровой фильтр»; античит Vanguard — «Игровой режим» в настройках.",
+      "domains": ["riotgames.com", "riotcdn.net", "riotcdn.com", "leagueoflegends.com", "playvalorant.com", "pvp.net", "rgpub.io", "riotclientservices.com", "rdatasrv.net"]
+    },
+    {
+      "id": "ubisoft", "title": "Ubisoft и Rainbow Six Siege", "group": "games",
+      "note": "Ubisoft Connect, вход и сервисы Rainbow Six Siege.",
+      "domains": ["ubi.com", "ubisoft.com", "ubisoftconnect.com", "uplay.com", "rainbow6.com", "r6s.com", "ubisoft-orbit.s3.amazonaws.com"]
+    },
+    {
+      "id": "steam", "title": "Steam", "group": "games",
+      "note": "Магазин, сообщество, загрузки и чат.",
+      "domains": ["steampowered.com", "steamcommunity.com", "steamstatic.com", "steamcontent.com", "steamserver.net", "steamusercontent.com", "steamgames.com", "steam-chat.com", "valvesoftware.com"]
+    },
+    {
+      "id": "epic", "title": "Epic Games и Fortnite", "group": "games",
+      "note": "Лаунчер, вход и загрузки.",
+      "domains": ["epicgames.com", "epicgames.dev", "epicgamescdn.com", "unrealengine.com", "fortnite.com"]
+    },
+    {
+      "id": "battlenet", "title": "Battle.net", "group": "games",
+      "note": "Лаунчер Blizzard и вход.",
+      "domains": ["battle.net", "blizzard.com"]
+    },
+    {
+      "id": "minecraft", "title": "Minecraft", "group": "games",
+      "note": "Вход, лаунчер и загрузки.",
+      "domains": ["minecraft.net", "mojang.com", "minecraftservices.com"]
+    },
+    {
+      "id": "warframe", "title": "Warframe", "group": "games",
+      "note": "Сайт, обновления и чат.",
+      "domains": ["warframe.com", "digitalextremes.com"]
+    },
+    {
+      "id": "mods", "title": "Моды: Nexus Mods и Modrinth", "group": "games",
+      "note": "Сайты и скачивание модов.",
+      "domains": ["nexusmods.com", "nexus-cdn.com", "modrinth.com"]
+    },
+    {
+      "id": "itch", "title": "itch.io", "group": "games",
+      "note": "Сайт и загрузка инди-игр.",
+      "domains": ["itch.io", "itch.zone"]
+    }
+  ]
+}
