@@ -137,6 +137,8 @@ namespace Veylix
                 RefreshActivity();
                 if (page == "events") RefreshStats();
                 UpdateCompanion();
+                UpdateTrayIcon(CurrentTrayState());   // точка «ошибка» гаснет через 5 минут без событий
+                if (ticks % 30 == 0) RefreshWidget();   // время работы в виджете
                 if (++ticks % 15 == 0) RefreshMap();
                 if (ticks % 2 == 0) CheckGames();
                 if (ticks % 30 == 0) CheckThemeSchedule();
@@ -210,8 +212,9 @@ namespace Veylix
         void BuildTray()
         {
             tray = new WF.NotifyIcon();
-            try { tray.Icon = SD.Icon.ExtractAssociatedIcon(Assembly.GetExecutingAssembly().Location); }
-            catch { tray.Icon = SD.SystemIcons.Application; }
+            try { trayBase = SD.Icon.ExtractAssociatedIcon(Assembly.GetExecutingAssembly().Location); }
+            catch { trayBase = SD.SystemIcons.Application; }
+            tray.Icon = trayBase;
             tray.Text = "Veylix";
             // вместо стандартного меню — своя панель в стиле приложения (TrayFlyout.cs)
             tray.MouseClick += delegate(object s, WF.MouseEventArgs e)
@@ -220,6 +223,41 @@ namespace Veylix
                 else if (e.Button == WF.MouseButtons.Left) { CloseFlyout(); ShowFromTray(); }   // ЛКМ — окно Veylix
             };
             tray.Visible = true;
+        }
+
+        SD.Icon trayBase;
+        string trayState;
+        readonly Dictionary<string, SD.Icon> trayIcons = new Dictionary<string, SD.Icon>();
+
+        // Точка состояния на значке: иконки рисуются один раз на состояние и переиспользуются
+        void UpdateTrayIcon(string state)
+        {
+            if (tray == null || state == trayState) return;
+            try
+            {
+                SD.Icon ic;
+                if (!trayIcons.TryGetValue(state, out ic))
+                {
+                    ic = TrayBadge.Make(trayBase, state);
+                    trayIcons[state] = ic;
+                }
+                tray.Icon = ic;
+                trayState = state;
+            }
+            catch { }
+        }
+
+        string CurrentTrayState()
+        {
+            return TrayBadge.State(engine.IsRunning, busy || tuning, gamePausedFor != null, EngineFailed());
+        }
+
+        // Сбой самого обхода за последние 5 минут (недоступность сайтов при выключенном обходе — не сбой)
+        bool EngineFailed()
+        {
+            if (engine.IsRunning) return false;
+            DateTime last = lastExitAt > lastStartFailAt ? lastExitAt : lastStartFailAt;
+            return last != DateTime.MinValue && DateTime.Now - last < TimeSpan.FromMinutes(5);
         }
 
         void TrayBalloon(string title, string text, WF.ToolTipIcon icon)
@@ -270,6 +308,7 @@ namespace Veylix
             reallyExit = true;
             if (tuneCts != null) tuneCts.Cancel();
             pulseMon.Stop();
+            CloseWidget();
             try { Hide(); } catch { }
             try { if (tray != null) tray.Visible = false; } catch { }
             Task stop = Task.Run(delegate { try { engine.Shutdown(); } catch { } });
@@ -282,10 +321,14 @@ namespace Veylix
         // Автозапуск с Windows: окно не показываем, сразу работаем в трее
         public void StartInBackground()
         {
-            OnFirstShow();
+            // Вызывается до app.Run(): цикл WPF ещё не запущен и SynchronizationContext не задан, поэтому
+            // продолжения после await ушли бы в фоновый поток и падали на первом обращении к интерфейсу.
+            // Откладываем запуск в очередь диспетчера — он выполнится уже внутри цикла WPF.
+            Dispatcher.BeginInvoke(new Action(OnFirstShow), DispatcherPriority.Loaded);
         }
 
         bool started;
+        bool dnsHintShown;
         bool autoStartPending;   // автозапуск ещё пытается включить обход; ручное нажатие кнопки его отменяет
 
         // Сразу после входа в Windows сеть, служба BFE и драйвер WinDivert бывают ещё не готовы,
@@ -363,6 +406,7 @@ namespace Veylix
                 RefreshSettingsState();
 
                 if (autoMode && !DeferStartForGame(selected)) await AutoStartBypass();
+                if (cfg.WidgetOn && !selfTest) ShowWidget();
                 if (engine.CheckUpdatesEnabled) await CheckUpdates(false);
                 if (cfg.AppUpdateCheck && Program.PostUpdatePlan == null) CheckAppUpdate(false);
             }
@@ -426,13 +470,17 @@ namespace Veylix
             {
                 try
                 {
-                    string tt = run ? "Veylix — работает: " + name : gamePausedFor != null ? "Veylix — пауза для игры: " + GameWatch.Pretty(gamePausedFor) : "Veylix — обход выключен";
+                    string ts = CurrentTrayState();
+                    string tt = run ? "Veylix — работает: " + name : gamePausedFor != null ? "Veylix — пауза для игры: " + GameWatch.Pretty(gamePausedFor)
+                        : ts == "err" ? "Veylix — ошибка, обход выключен" : "Veylix — обход выключен";
                     tray.Text = tt.Length > 63 ? tt.Substring(0, 63) : tt;
+                    UpdateTrayIcon(ts);
                 }
                 catch { }
             }
             UpdateUptime();
             RefreshFlyout();
+            RefreshWidget();
             TrackEngine();
             RefreshMap();
             RefreshActivity();
@@ -684,8 +732,11 @@ namespace Veylix
                 foreach (ServiceResult s in r2)
                     foreach (ProbeResult p in s.Probes)
                         if (p.Stage == "DNS" && p.Status == ProbeStatus.Blocked) dnsBlock = true;
-                if (dnsBlock)
+                if (dnsBlock && !dnsHintShown)
+                {
+                    dnsHintShown = true;   // подсказка один раз за сеанс, а не после каждой проверки
                     log.Add("info", "Похоже на DNS-блокировку: провайдер скрывает адрес сайта, а обход это не лечит. Включите защищённый DNS в разделе «Сайты и DNS».");
+                }
                 if (!good && engine.IsRunning && r2[0].Status != ServiceStatus.NoNetwork && r2[0].Status != ServiceStatus.Unavailable)
                     log.Add("info", "Если что-то не открывается — выберите другую стратегию или запустите автоподбор.");
                 if (diagPage != null && lastDiag != null) RenderDiagnostics();
@@ -1320,6 +1371,25 @@ namespace Veylix
                 fbText.Text = "";
                 fbContact.Text = "";
                 tgFbReport.IsOn = false;
+
+                // мини-виджет: содержимое окна в рабочем состоянии
+                Border wb = new Border();
+                wb.Width = WidgetLogic.Width;
+                wb.SetResourceReference(Border.BackgroundProperty, "Popup");
+                wb.HorizontalAlignment = HorizontalAlignment.Left;
+                wb.VerticalAlignment = VerticalAlignment.Top;
+                wb.Child = BuildWidgetContent();
+                ProbeResult pd = new ProbeResult(); pd.Status = ProbeStatus.Ok; pd.TcpMs = 21; pd.TlsMs = 24;
+                ProbeResult py = new ProbeResult(); py.Status = ProbeStatus.Partial; py.TcpMs = 30; py.TlsMs = 41;
+                wLastDiscord = pd; wLastYoutube = py;
+                RefreshWidget();
+                design.Children.Add(wb);
+                design.Measure(new Size(DW, DH));
+                design.Arrange(new Rect(0, 0, DW, DH));
+                design.UpdateLayout();
+                SnapElement(wb, Path.Combine(dir, "widget-" + Theme.Current.Id + ".png"));
+                design.Children.Remove(wb);
+                wTitle = null;
 
                 // «Что нового»: содержимое окна после обновления с 2.3.4
                 Border wn = new Border();

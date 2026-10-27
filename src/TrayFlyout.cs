@@ -243,6 +243,7 @@ namespace Veylix
             fg.ColumnDefinitions.Add(Theme.Col(0));
             fg.ColumnDefinitions.Add(Theme.Col(-1));
             fg.ColumnDefinitions.Add(Theme.Col(-1));
+            fg.ColumnDefinitions.Add(Theme.Col(-1));
             VButton open = new VButton(null, null, 9);
             open.Height = 32;
             open.HorizontalAlignment = HorizontalAlignment.Left;
@@ -256,13 +257,17 @@ namespace Veylix
             open.Content = op;
             open.Click += delegate { CloseFlyout(); ShowFromTray(); };
             fg.Children.Add(open);
+            VButton wgt = Ui.IconButton(0xE737, widget != null ? "Скрыть мини-виджет" : "Показать мини-виджет поверх окон");
+            wgt.Click += delegate { CloseFlyout(); ToggleWidget(); };
+            Grid.SetColumn(wgt, 1);
+            fg.Children.Add(wgt);
             VButton set = Ui.IconButton(0xE713, "Настройки");
             set.Click += delegate { CloseFlyout(); ShowFromTray(); ShowPage("settings"); };
-            Grid.SetColumn(set, 1);
+            Grid.SetColumn(set, 2);
             fg.Children.Add(set);
             VButton exit = Ui.IconButton(0xE7E8, "Выйти из Veylix (обход остановится)");
             exit.Click += delegate { CloseFlyout(); ExitApp(); };
-            Grid.SetColumn(exit, 2);
+            Grid.SetColumn(exit, 3);
             fg.Children.Add(exit);
             foot.Child = fg;
             root.Children.Add(foot);

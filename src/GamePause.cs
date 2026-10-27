@@ -113,6 +113,7 @@ namespace Veylix
             navStatus.Text = "Пауза для игры";
             navSub.Text = name;
             Ui.SetChip(heroChip, "Пауза для игры", "warn");
+            SetAura("pause");
         }
 
         // ====================== карточка в настройках ======================

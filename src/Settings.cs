@@ -29,6 +29,8 @@ namespace Veylix
         public bool GameWatch = false;        // игровой режим: пауза обхода, пока запущена игра из списка
         public string GameWatchList = "";     // exe игр и античитов через «|»
         public string SeenVersion = "";       // версия, о которой уже показали «Что нового»
+        public bool WidgetOn = false;         // мини-виджет поверх окон
+        public double WidgetX = double.NaN, WidgetY = double.NaN;   // его позиция (NaN — правый нижний угол)
         public bool LoadedFromFile;           // настройки прочитаны из файла (не первая установка)
 
         public const string DefaultPinned = "check.services,diag.run,lists.user,lists.exclude,ipset.update,folder.open";
@@ -91,6 +93,12 @@ namespace Veylix
             return s;
         }
 
+        static double ParseCoord(string v)
+        {
+            double d;
+            return double.TryParse(v, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out d) && Math.Abs(d) < 100000 ? d : double.NaN;
+        }
+
         void Set(string k, string v)
         {
             switch (k)
@@ -119,6 +127,9 @@ namespace Veylix
                 case "GameWatch": GameWatch = v == "1" || v.Equals("true", StringComparison.OrdinalIgnoreCase); break;
                 case "GameWatchList": GameWatchList = v; break;
                 case "SeenVersion": SeenVersion = v; break;
+                case "WidgetOn": WidgetOn = v == "1"; break;
+                case "WidgetX": WidgetX = ParseCoord(v); break;
+                case "WidgetY": WidgetY = ParseCoord(v); break;
                 default:
                     if (!extra.ContainsKey(k)) order.Add(k);
                     extra[k] = v;
@@ -161,6 +172,9 @@ namespace Veylix
             sb.Append("GameWatch=").Append(GameWatch ? "1" : "0").Append("\r\n");
             sb.Append("GameWatchList=").Append(GameWatchList).Append("\r\n");
             sb.Append("SeenVersion=").Append(SeenVersion).Append("\r\n");
+            sb.Append("WidgetOn=").Append(WidgetOn ? "1" : "0").Append("\r\n");
+            sb.Append("WidgetX=").Append(double.IsNaN(WidgetX) ? "" : Math.Round(WidgetX).ToString(System.Globalization.CultureInfo.InvariantCulture)).Append("\r\n");
+            sb.Append("WidgetY=").Append(double.IsNaN(WidgetY) ? "" : Math.Round(WidgetY).ToString(System.Globalization.CultureInfo.InvariantCulture)).Append("\r\n");
             foreach (string k in order)
                 sb.Append(k).Append('=').Append(extra[k]).Append("\r\n");
             return sb.ToString();

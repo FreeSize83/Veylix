@@ -56,6 +56,10 @@ namespace Veylix
         VButton powerBtn, checkBtn;
         TextBlock powerGlyph, statusText, stratText, uptimeText, checkWhen;
         Ellipse halo;
+        VToggle tgWidget;
+        Card heroCard;
+        Rectangle heroAura;          // мягкое свечение цвета состояния за кнопкой питания
+        string auraMode = "";
         string haloMode = "";
         List<CheckRow> checkRows;
         TextBlock tileStrat, tileIpset, tileGame, tileTune;
@@ -524,6 +528,7 @@ namespace Veylix
         {
             Card c = new Card(22);
             c.Inner = new Thickness(20);
+            heroCard = c;
             StackPanel sp = new StackPanel();
             sp.VerticalAlignment = VerticalAlignment.Center;
             sp.HorizontalAlignment = HorizontalAlignment.Center;
@@ -565,6 +570,11 @@ namespace Veylix
             sp.Children.Add(uptimeText);
 
             Grid hg = new Grid();
+            heroAura = new Rectangle();
+            heroAura.Margin = new Thickness(-20);   // на всю карточку, поверх отступа Inner
+            heroAura.IsHitTestVisible = false;
+            heroAura.Opacity = 0;
+            hg.Children.Add(heroAura);
             hg.Children.Add(sp);
             heroChip = Ui.Chip("Обход выключен", "idle");
             heroChip.VerticalAlignment = VerticalAlignment.Top;
@@ -584,6 +594,7 @@ namespace Veylix
         // Пересоздаёт иллюстрации под текущую тему (пчёлки, сцена в шапке)
         void UpdateScenes()
         {
+            RefreshTileColors();
             if (sceneHeader == null || Theme.Current == null) return;
             Palette p = Theme.Current;
             navArtLabel = null;
@@ -659,6 +670,7 @@ namespace Veylix
             else powerRing.Effect = null;
 
             string hm = state == "off" ? "off" : state == "run" ? "run" : "busy";
+            SetAura(hm);
             if (hm == haloMode) return;
             haloMode = hm;
             halo.SetResourceReference(Shape.FillProperty, hm == "busy" ? "WarnSoft" : "AccentSoft");
@@ -679,6 +691,58 @@ namespace Veylix
             {
                 halo.BeginAnimation(UIElement.OpacityProperty, null);
                 halo.Opacity = 0.8;
+            }
+        }
+
+        // Карточка «дышит» цветом состояния: зелёным, пока обход работает, янтарным — во время операций
+        // и паузы для игры; выключенный обход — без свечения. Яркость следует настройке свечения в Theme Studio.
+        void SetAura(string mode)
+        {
+            if (heroAura == null) return;
+            string colorKey = mode == "run" ? "Ok" : mode == "off" ? null : "Warn";
+            double r = Math.Max(0, 22 * Theme.CornerScale - 1);
+            heroAura.RadiusX = r;
+            heroAura.RadiusY = r;
+            if (colorKey != null)
+            {
+                SolidColorBrush sb = Theme.Res(colorKey) as SolidColorBrush;
+                Color col = sb != null ? sb.Color : Colors.LimeGreen;
+                bool dark = Theme.Current != null && Theme.Current.Dark;
+                RadialGradientBrush g = new RadialGradientBrush();
+                g.Center = new Point(0.5, 0.36);
+                g.GradientOrigin = new Point(0.5, 0.36);
+                g.RadiusX = 0.62;
+                g.RadiusY = 0.58;
+                g.GradientStops.Add(new GradientStop(Color.FromArgb((byte)(dark ? 70 : 52), col.R, col.G, col.B), 0));
+                g.GradientStops.Add(new GradientStop(Color.FromArgb((byte)(dark ? 26 : 18), col.R, col.G, col.B), 0.55));
+                g.GradientStops.Add(new GradientStop(Color.FromArgb(0, col.R, col.G, col.B), 1));
+                g.Freeze();
+                heroAura.Fill = g;
+                heroCard.BorderBrush = new SolidColorBrush(Color.FromArgb((byte)(dark ? 120 : 140), col.R, col.G, col.B));
+            }
+            else heroCard.SetResourceReference(Border.BorderBrushProperty, "Stroke");
+
+            string key = mode + "|" + (Theme.Current != null ? Theme.Current.Id : "") + "|" + Theme.Animations + "|" + Theme.GlowFactor;
+            if (key == auraMode) return;
+            auraMode = key;
+            double top = Math.Max(0.35, Math.Min(1.0, Theme.GlowFactor));
+            if (colorKey == null)
+            {
+                heroAura.BeginAnimation(UIElement.OpacityProperty, null);
+                Theme.Animate(heroAura, UIElement.OpacityProperty, 0, 300);
+            }
+            else if (Theme.Animations && mode != "pause")
+            {
+                DoubleAnimation a = new DoubleAnimation(0.45 * top, top, new Duration(Theme.Dur(mode == "busy" ? 0.8 : 2.4)));
+                a.AutoReverse = true;
+                a.RepeatBehavior = RepeatBehavior.Forever;
+                a.EasingFunction = new SineEase { EasingMode = EasingMode.EaseInOut };
+                heroAura.BeginAnimation(UIElement.OpacityProperty, a);
+            }
+            else
+            {
+                heroAura.BeginAnimation(UIElement.OpacityProperty, null);
+                heroAura.Opacity = 0.75 * top;
             }
         }
 
@@ -878,25 +942,60 @@ namespace Veylix
                 (fails > 0 ? ", без ответа: " + fails : "");
         }
 
+        // Плитки главной: фон карточки, мягкий оттенок своего цвета из угла и значок того же цвета.
+        // Цвет у каждой плитки свой (TileHue1–4 из темы), но плитка не спорит с кнопкой питания.
+        readonly List<object[]> homeTiles = new List<object[]>();
+
         VButton Tile(int index, int glyph, string caption, string tip, out TextBlock value)
         {
-            VButton b = new VButton("Tile" + index, "TileStroke", 18);
+            VButton b = new VButton("Surface", "Stroke", 18);
             b.ToolTip = tip;
+            Grid g = new Grid();
+            Border tint = new Border();
+            tint.IsHitTestVisible = false;
+            g.Children.Add(tint);
             StackPanel sp = new StackPanel();
             sp.Margin = new Thickness(16, 12, 16, 10);
             Border ic = new Border();
             ic.Width = 30; ic.Height = 30;
-            ic.CornerRadius = new CornerRadius(11);
+            ic.CornerRadius = new CornerRadius(10);
             ic.HorizontalAlignment = HorizontalAlignment.Left;
-            ic.SetResourceReference(Border.BackgroundProperty, "TileIconBg");
-            ic.Child = Theme.Icon(glyph, 16, "TileIcon");
+            TextBlock glyphText = Theme.Icon(glyph, 15, "Accent");
+            ic.Child = glyphText;
             sp.Children.Add(ic);
-            value = Theme.T("", 18, "TileFg", true);
+            value = Theme.T("", 18, "Text", true);
             value.Margin = new Thickness(0, 6, 0, 0);
             sp.Children.Add(value);
-            sp.Children.Add(Theme.T(caption, 12.5, "TileFg2", false));
-            b.Content = sp;
+            sp.Children.Add(Theme.T(caption, 12.5, "Text2", false));
+            g.Children.Add(sp);
+            b.Content = g;
+            homeTiles.Add(new object[] { index, tint, ic, glyphText });
+            RefreshTileColors();
             return b;
+        }
+
+        void RefreshTileColors()
+        {
+            if (Theme.Current == null) return;
+            bool dark = Theme.Current.Dark;
+            double r = Math.Max(0, 18 * Theme.CornerScale - 1);
+            foreach (object[] t in homeTiles)
+            {
+                SolidColorBrush hb = Theme.Res("TileHue" + (int)t[0]) as SolidColorBrush;
+                Color hue = hb != null ? hb.Color : Colors.SlateBlue;
+                Border tint = (Border)t[1], ic = (Border)t[2];
+                TextBlock glyph = (TextBlock)t[3];
+                LinearGradientBrush lg = new LinearGradientBrush();
+                lg.StartPoint = new Point(0, 0);
+                lg.EndPoint = new Point(1, 1);
+                lg.GradientStops.Add(new GradientStop(Color.FromArgb((byte)(dark ? 38 : 16), hue.R, hue.G, hue.B), 0));
+                lg.GradientStops.Add(new GradientStop(Color.FromArgb(0, hue.R, hue.G, hue.B), 0.7));
+                lg.Freeze();
+                tint.Background = lg;
+                tint.CornerRadius = new CornerRadius(r);
+                ic.Background = new SolidColorBrush(Color.FromArgb((byte)(dark ? 52 : 30), hue.R, hue.G, hue.B));
+                glyph.Foreground = new SolidColorBrush(Theme.TileIconColor(hue, dark));
+            }
         }
 
         VButton LinkButton(string text)
@@ -910,7 +1009,7 @@ namespace Veylix
             return b;
         }
 
-        WrapPanel quickWrap;
+        System.Windows.Controls.Primitives.UniformGrid quickWrap;
 
         FrameworkElement BuildQuickActions()
         {
@@ -928,10 +1027,32 @@ namespace Veylix
             Grid.SetColumn(cfgBtn, 1);
             head.Children.Add(cfgBtn);
             sp.Children.Add(head);
-            quickWrap = new WrapPanel();
-            quickWrap.Margin = new Thickness(0, 10, 0, 0);
+            quickWrap = new System.Windows.Controls.Primitives.UniformGrid();
+            quickWrap.Columns = 3;
+            quickWrap.Margin = new Thickness(0, 8, 0, 0);
             sp.Children.Add(quickWrap);
-            c.Content = Theme.Scroll(sp);
+
+            // Всегда на виду, не зависит от закреплённых действий: форма отзыва иначе спрятана в настройках
+            Grid g = new Grid();
+            g.RowDefinitions.Add(Theme.RowDef(0));
+            g.RowDefinitions.Add(Theme.RowDef(-1));
+            g.Children.Add(Theme.Scroll(sp));
+            VButton fb = new VButton("AccentSoft", null, 10);
+            fb.Height = 32;
+            fb.Margin = new Thickness(0, 2, 6, 8);
+            StackPanel fr = Theme.Row();
+            fr.HorizontalAlignment = HorizontalAlignment.Center;
+            fr.VerticalAlignment = VerticalAlignment.Center;
+            TextBlock fi = Theme.Icon(0xE8BD, 12, "Accent");
+            fi.Margin = new Thickness(0, 1, 8, 0);
+            fr.Children.Add(fi);
+            fr.Children.Add(Theme.T("Идея или ошибка? Написать нам", 12.5, "Accent", true));
+            fb.Content = fr;
+            fb.ToolTip = "Сообщение сразу придёт разработчику Veylix. Аккаунты не нужны.";
+            fb.Click += delegate { OpenFeedback(); };
+            Grid.SetRow(fb, 1);
+            g.Children.Add(fb);
+            c.Content = g;
             RebuildQuickActions();
             return c;
         }
@@ -945,17 +1066,28 @@ namespace Veylix
                 AppCommand cmd;
                 if (!commandById.TryGetValue(id, out cmd)) continue;
                 AppCommand cc = cmd;
-                VButton b = new VButton("Surface2", "Stroke", 9);
-                b.Height = 32;
-                b.Margin = new Thickness(0, 0, 6, Math.Round(6 * Theme.Density));
-                StackPanel row = Theme.Row();
-                row.Margin = new Thickness(10, 0, 11, 0);
-                row.VerticalAlignment = VerticalAlignment.Center;
-                TextBlock ic = Theme.Icon(cc.Glyph, 11.5, "Accent");
-                ic.Margin = new Thickness(0, 1, 7, 0);
-                row.Children.Add(ic);
-                row.Children.Add(Theme.T(cc.ShortTitle, 12, "Text", true));
-                b.Content = row;
+                // плитка, как в панели трея: иконка сверху, подпись под ней
+                VButton b = new VButton("Surface2", "Stroke", 10);
+                b.Height = 48;
+                b.Margin = new Thickness(0, 0, 6, Math.Round(5 * Theme.Density));
+                StackPanel col = new StackPanel();
+                col.VerticalAlignment = VerticalAlignment.Center;
+                col.Margin = new Thickness(4, 0, 4, 0);
+                TextBlock ic = Theme.Icon(cc.Glyph, 12, "Accent");
+                ic.HorizontalAlignment = HorizontalAlignment.Center;
+                col.Children.Add(ic);
+                // подпись в две строки по центру: «Проверить / сервисы», «Обновить / IPSet»
+                TextBlock lbl = Theme.T(cc.ShortTitle, 10.5, "Text", true);
+                lbl.HorizontalAlignment = HorizontalAlignment.Center;
+                lbl.TextAlignment = TextAlignment.Center;
+                lbl.TextWrapping = TextWrapping.Wrap;
+                lbl.TextTrimming = TextTrimming.CharacterEllipsis;
+                lbl.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
+                lbl.LineHeight = 12.5;
+                lbl.MaxHeight = 25;
+                lbl.Margin = new Thickness(0, 3, 0, 0);
+                col.Children.Add(lbl);
+                b.Content = col;
                 b.ToolTip = cc.CurrentTitle + (cc.Shortcut.Length > 0 ? " (" + cc.Shortcut + ")" : "");
                 b.Click += delegate
                 {
@@ -965,6 +1097,7 @@ namespace Veylix
                 };
                 quickWrap.Children.Add(b);
             }
+            quickWrap.Columns = quickWrap.Children.Count == 0 ? 1 : 3;
             if (quickWrap.Children.Count == 0)
                 quickWrap.Children.Add(Theme.Wrap("Нет закреплённых действий. Нажмите «Настроить».", 12, "Text3"));
         }
@@ -1514,6 +1647,11 @@ namespace Veylix
             tgTray.Clicked += delegate { ToggleCloseToTray(); };
             TextBlock d3;
             s2.Children.Add(Ui.SettingRow("Закрывать в трей", "Если обход работает, крестик прячет окно в трей вместо выхода. Значок в трее: левая кнопка — открыть окно, правая — панель трея.", tgTray, out d3));
+            tgWidget = new VToggle();
+            tgWidget.Clicked += delegate { ToggleWidget(); };
+            TextBlock d6;
+            s2.Children.Add(Ui.SettingRow("Мини-виджет поверх окон",
+                "Маленькая плашка в углу экрана: состояние обхода, стратегия, задержка до Discord и YouTube и кнопка включения. Перетаскивается мышью.", tgWidget, out d6));
             tgToasts = new VToggle();
             tgToasts.Clicked += delegate { ToggleToasts(); };
             TextBlock d5;
@@ -1779,6 +1917,7 @@ namespace Veylix
             tgAutorun.IsOn = autorunOn;
             tgAutorun.IsEnabled = !autorunBusy;
             tgTray.IsOn = cfg.CloseToTray;
+            if (tgWidget != null) tgWidget.IsOn = widget != null || (selfTest && cfg.WidgetOn);
             tgToasts.IsOn = cfg.Toasts;
             tgCheckUpd.IsOn = engine.CheckUpdatesEnabled;
         }

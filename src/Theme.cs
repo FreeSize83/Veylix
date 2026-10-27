@@ -376,37 +376,28 @@ namespace Veylix
                 }
             }
             p.Title = FamilyTitle(family) + (family == "purple" || family == "mint" || family == "glass" ? (p.Dark ? " · тёмная" : " · светлая") : "");
-            if (!p.Res.ContainsKey("Tile1"))
+            if (!p.Res.ContainsKey("TileHue1"))
             {
-                // обычные темы: плитки выглядят как карточки
-                for (int i = 1; i <= 4; i++) p.Res["Tile" + i] = p.Res["Surface"];
-                p.Res["TileFg"] = p.Res["Text"];
-                p.Res["TileFg2"] = p.Res["Text2"];
-                p.Res["TileIcon"] = p.Res["Accent"];
-                p.Res["TileIconBg"] = p.Res["AccentSoft"];
-                p.Res["TileStroke"] = p.Res["Stroke"];
+                // обычные темы: спокойные оттенки — синий, фиолетовый, янтарный, бирюзовый
+                string[] hues = p.Dark ? new string[] { "#7C9CFF", "#B08CFF", "#F0B45E", "#4FD1C5" }
+                                       : new string[] { "#3B5BDB", "#7048E8", "#D9822B", "#0F9488" };
+                for (int i = 0; i < 4; i++) p.Res["TileHue" + (i + 1)] = B(hues[i]);
             }
             return p;
         }
 
-        // Яркие плитки иллюстрированных тем: четыре градиента и белый текст
+        // Цвета плиток иллюстрированных тем (раньше это были яркие градиенты на всю плитку;
+        // теперь цвет даёт только мягкий оттенок в углу и значок, чтобы плитки не перетягивали внимание)
         static void Tiles(Palette p, string[] stops)
         {
-            for (int i = 0; i < 4; i++)
-            {
-                LinearGradientBrush g = new LinearGradientBrush();
-                g.StartPoint = new Point(0, 0);
-                g.EndPoint = new Point(0.6, 1);
-                g.GradientStops.Add(new GradientStop(C(stops[i * 2]), 0));
-                g.GradientStops.Add(new GradientStop(C(stops[i * 2 + 1]), 1));
-                g.Freeze();
-                p.Res["Tile" + (i + 1)] = g;
-            }
-            p.Res["TileFg"] = B("#FFFFFF");
-            p.Res["TileFg2"] = B("#EBFFFFFF");
-            p.Res["TileIcon"] = B("#FFFFFF");
-            p.Res["TileIconBg"] = B("#33FFFFFF");
-            p.Res["TileStroke"] = B("#29FFFFFF");
+            for (int i = 0; i < 4; i++) p.Res["TileHue" + (i + 1)] = B(stops[i * 2]);
+        }
+
+        // Цвет значка плитки: на тёмных темах осветлённый, на светлых — затемнённый, чтобы читался на подложке
+        public static Color TileIconColor(Color hue, bool dark)
+        {
+            if (!dark) return Color.FromRgb((byte)(hue.R * 0.7), (byte)(hue.G * 0.7), (byte)(hue.B * 0.7));
+            return Color.FromRgb((byte)(hue.R + (255 - hue.R) * 0.42), (byte)(hue.G + (255 - hue.G) * 0.42), (byte)(hue.B + (255 - hue.B) * 0.42));
         }
 
         // световой блик по верхней кромке стеклянных панелей

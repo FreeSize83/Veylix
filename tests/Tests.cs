@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Windows;
 using System.Net;
 using System.Collections.Generic;
 using System.IO;
@@ -56,6 +57,7 @@ namespace Veylix.Tests
                 Run("Проверка сайта", TestSiteCheck);
                 Run("Что нового после обновления", TestWhatsNew);
                 Run("Обратная связь", TestFeedback);
+                Run("Значок трея и мини-виджет", TestTrayAndWidget);
                 Run("DNS через HTTPS и резервная копия DNS", TestDoh);
                 Run("Вердикты сетевых проверок", TestVerdicts);
                 Run("Диагностика", TestDiagnostics);
@@ -190,7 +192,7 @@ namespace Veylix.Tests
         {
             string[] keys = { "Bg", "Nav", "Surface", "Surface2", "Stroke", "StrokeStrong", "Text", "Text2", "Text3", "Accent", "AccentSoft", "OnAccent",
                               "Ok", "OkSoft", "Warn", "WarnSoft", "Err", "ErrSoft", "Info", "InfoSoft", "Hover", "Press", "Input", "Popup", "ScrollThumb", "Sheen",
-                              "Tile1", "Tile2", "Tile3", "Tile4", "TileFg", "TileFg2", "TileIcon", "TileIconBg", "TileStroke" };
+                              "TileHue1", "TileHue2", "TileHue3", "TileHue4" };
             foreach (string fam in Theme.Families)
             {
                 foreach (bool dark in new bool[] { false, true })
@@ -210,15 +212,14 @@ namespace Veylix.Tests
                     Check(ok >= 3.0, p.Id + ": цвет «успех» на карточке " + ok.ToString("0.0") + " ≥ 3");
                     for (int i = 1; i <= 4; i++)
                     {
-                        // подпись плитки: худший случай по обоим концам градиента
-                        GradientBrush gb = p.Res["Tile" + i] as GradientBrush;
-                        Color[] cs = gb != null ? new Color[] { gb.GradientStops[0].Color, gb.GradientStops[1].Color } : new Color[] { Solid((Brush)p.Res["Tile" + i]) };
-                        foreach (Color tc in cs)
-                        {
-                            Color under = Over(tc, bg);
-                            double tf = Contrast(Over(Solid((Brush)p.Res["TileFg2"]), under), under);
-                            Check(tf >= 4.5, p.Id + ": подпись на плитке " + i + " — контраст " + tf.ToString("0.0") + " ≥ 4.5");
-                        }
+                        // плитка: фон карточки с оттенком в углу (как в RefreshTileColors) и значок того же цвета
+                        Color hue = Solid((Brush)p.Res["TileHue" + i]);
+                        Color corner = Over(Color.FromArgb((byte)(p.Dark ? 38 : 16), hue.R, hue.G, hue.B), surface);
+                        double tf = Contrast(Solid((Brush)p.Res["Text2"]), corner);
+                        Check(tf >= 4.5, p.Id + ": подпись на плитке " + i + " — контраст " + tf.ToString("0.0") + " ≥ 4.5");
+                        Color chip = Over(Color.FromArgb((byte)(p.Dark ? 52 : 30), hue.R, hue.G, hue.B), corner);
+                        double ic = Contrast(Theme.TileIconColor(hue, p.Dark), chip);
+                        Check(ic >= 3.0, p.Id + ": значок плитки " + i + " — контраст " + ic.ToString("0.0") + " ≥ 3");
                     }
                 }
             }
@@ -380,6 +381,58 @@ namespace Veylix.Tests
             Check(!s.Contains("feed"), "IPv6 замаскирован");
             Check(LogStore.Redact("Bearer abcdefghijklmnop").Contains("***"), "Bearer-токен скрыт");
             Check(LogStore.Sanitize("Flowseal 1.10.3 · ALT3").Contains("1.10.3"), "номер версии не портится");
+        }
+
+        static void TestTrayAndWidget()
+        {
+            Eq("busy", TrayBadge.State(true, true, false, false), "операция важнее всего");
+            Eq("run", TrayBadge.State(true, false, true, true), "обход работает");
+            Eq("pause", TrayBadge.State(false, false, true, true), "пауза для игры");
+            Eq("err", TrayBadge.State(false, false, false, true), "сбой обхода");
+            Eq("off", TrayBadge.State(false, false, false, false), "выключен");
+            Check(TrayBadge.DotColor("run").G > 150 && TrayBadge.DotColor("err").R > 200, "цвета точки");
+
+            using (System.Drawing.Icon baseIc = System.Drawing.SystemIcons.Application)
+            using (System.Drawing.Icon ic = TrayBadge.Make(baseIc, "run"))
+            using (System.Drawing.Bitmap bmp = ic.ToBitmap())
+            {
+                Eq(32, ic.Width, "иконка 32×32");
+                System.Drawing.Color c = bmp.GetPixel(24, 24);   // центр точки
+                Check(c.G > 150 && c.R < 100 && c.A > 200, "в углу зелёная точка: " + c);
+                Check(bmp.GetPixel(2, 2) != c, "остальная иконка не закрашена");
+            }
+            using (System.Drawing.Icon ic = TrayBadge.Make(null, "err"))
+                Check(ic.ToBitmap().GetPixel(24, 24).R > 200, "без исходной иконки — только точка");
+
+            Rect screen = new Rect(0, 0, 1920, 1080), work = new Rect(0, 0, 1920, 1040);
+            Point p = WidgetLogic.Place(double.NaN, double.NaN, 268, 90, screen, work);
+            Check(p.X == 1920 - 268 - 16 && p.Y == 1040 - 90 - 16, "по умолчанию — правый нижний угол над панелью задач");
+            p = WidgetLogic.Place(100, 200, 268, 90, screen, work);
+            Check(p.X == 100 && p.Y == 200, "сохранённая позиция");
+            p = WidgetLogic.Place(3000, 200, 268, 90, screen, work);
+            Check(p.X == 1920 - 268 - 16, "позиция за пределами экрана (отключили монитор) — в угол");
+            p = WidgetLogic.Place(1900, 1060, 268, 90, screen, work);
+            Check(p.X == 1920 - 268 - 16, "виден краешек меньше 60×30 — в угол");
+
+            Eq("…", WidgetLogic.Latency(null), "ещё не измерено");
+            ProbeResult ok = new ProbeResult(); ok.Status = ProbeStatus.Ok; ok.TcpMs = 20; ok.TlsMs = 25;
+            Eq("45 мс", WidgetLogic.Latency(ok), "TCP + TLS");
+            Eq("ok", WidgetLogic.Level(ok), "доступен");
+            ProbeResult bad = new ProbeResult(); bad.Status = ProbeStatus.Timeout; bad.Stage = "TLS";
+            Eq("нет", WidgetLogic.Latency(bad), "недоступен");
+            Eq("err", WidgetLogic.Level(bad), "недоступен — красный");
+            ProbeResult part = new ProbeResult(); part.Status = ProbeStatus.Partial; part.TcpMs = 30;
+            Eq("warn", WidgetLogic.Level(part), "частично — жёлтый");
+
+            Settings st = Settings.Load();
+            Check(!st.WidgetOn && double.IsNaN(st.WidgetX), "виджет по умолчанию выключен, позиции нет");
+            st.WidgetOn = true; st.WidgetX = -1250.4; st.WidgetY = 300;
+            Eq(null, st.Save(), "сохранение виджета");
+            Settings st2 = Settings.Load();
+            Check(st2.WidgetOn && st2.WidgetX == -1250 && st2.WidgetY == 300, "виджет и позиция (в том числе на левом мониторе) сохраняются");
+            st2.WidgetOn = false; st2.WidgetX = double.NaN; st2.WidgetY = double.NaN;
+            st2.Save();
+            Check(double.IsNaN(Settings.Load().WidgetX), "позиция сбрасывается");
         }
 
         static void TestFeedback()

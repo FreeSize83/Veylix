@@ -211,6 +211,10 @@ namespace Veylix
                 if (!IsVisible) ShowFromTray();
                 ShowWhatsNew(WhatsNew.Recent(Program.Version, 3), false);
             }).Keywords = "изменения changelog версия новое обновление";
+            AppCommand wid = Cmd("widget.toggle", chk, 0xE737, "Показать мини-виджет", null, ToggleWidget);
+            wid.DynamicTitle = delegate { return widget != null ? "Скрыть мини-виджет" : "Показать мини-виджет"; };
+            wid.Keywords = "виджет поверх окон плашка оверлей стрим";
+            wid.Short = "Мини-виджет";
             Cmd("feedback.open", chk, 0xE8BD, "Написать разработчику", null, OpenFeedback).Keywords = "отзыв идея ошибка баг предложение обратная связь telegram автор";
             AppCommand upd = Cmd("updates.check", chk, 0xE895, "Проверить обновления Flowseal", "Ctrl+U", delegate { Page("updates"); CheckUpdatesCommand(); });
             upd.Unavailable = delegate { return updating ? "идёт обновление" : null; };
