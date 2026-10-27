@@ -38,6 +38,19 @@
      имя переменной RATE.
    * Если кто-то начнёт спамить — смените токен в @BotFather (/revoke) и обновите BOT_TOKEN.
 
+НАРОДНАЯ КАРТА СТРАТЕГИЙ (тот же Worker + база D1, 3 минуты)
+   Veylix анонимно присылает результаты проверок стратегий (название стратегии и работают ли
+   Discord и YouTube), а показывает, что работает у других пользователей того же провайдера.
+   Провайдера (ASN) и регион определяет Cloudflare по соединению; IP-адреса не сохраняются.
+   * Обновите код Worker: Edit code → вставьте tools\feedback-worker.js целиком → Deploy.
+   * Слева «Storage & Databases» → «D1 SQL Database» → «Create» → имя veylix-crowd → Create.
+     (Бесплатно: 5 ГБ, 100 000 записей и 5 млн чтений в день.)
+   * Вернитесь в Worker → «Settings» → «Bindings» → «Add binding» → «D1 database»:
+        Variable name: DB      D1 database: veylix-crowd      → Add binding / Deploy.
+   * Таблицы Worker создаст сам при первом отчёте. Проверка: откройте адрес Worker —
+     должно быть {"ok":true,"service":"veylix-feedback","map":true}.
+   * Данные старше 14 дней удаляются автоматически.
+
 ЧТО ПРИХОДИТ
    Тип (идея / ошибка / сообщение), текст, контакт (если указан), версия Veylix и Windows,
    стратегия и страна (по данным Cloudflare). Если пользователь отметил «Приложить отчёт» —

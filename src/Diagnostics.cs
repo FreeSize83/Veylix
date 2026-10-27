@@ -126,8 +126,7 @@ namespace Veylix
                 {
                     if (ni.OperationalStatus != OperationalStatus.Up || ni.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
                     string d = (ni.Description + " " + ni.Name).ToLowerInvariant();
-                    if (ni.NetworkInterfaceType == NetworkInterfaceType.Ppp || d.Contains("wireguard") || d.Contains("wintun") ||
-                        d.Contains("tap-windows") || d.Contains("openvpn") || d.Contains("vpn") || d.Contains("tun "))
+                    if (ni.NetworkInterfaceType == NetworkInterfaceType.Ppp || VpnRoute.LooksLikeVpn(d))
                         vpn.Add(ni.Description);
                     try
                     {
@@ -142,8 +141,12 @@ namespace Veylix
             }
             catch { }
             r.Add(new DiagItem(G4, up2 ? "ok" : "err", "Сетевое подключение", up2 ? "есть" : "нет активных подключений", null));
-            if (vpn.Count > 0)
-                r.Add(new DiagItem(G4, "warn", "VPN-адаптеры", string.Join(", ", vpn), "Активный VPN может перехватывать трафик раньше winws: проверки будут показывать работу VPN, а не стратегии."));
+            string route = VpnRoute.Active();
+            if (route != null)
+                r.Add(new DiagItem(G4, "warn", "Интернет идёт через VPN", route,
+                    "Весь трафик уходит в туннель VPN, поэтому winws его не обрабатывает, а проверки показывают работу VPN, а не стратегии. Чтобы проверить обход, выключите VPN или его режим TUN."));
+            else if (vpn.Count > 0)
+                r.Add(new DiagItem(G4, "info", "VPN-адаптеры", string.Join(", ", vpn), "Адаптеры есть, но интернет идёт мимо них — на обход это не влияет."));
             r.Add(new DiagItem(G4, "info", "DNS-серверы", dns.Count > 0 ? string.Join(", ", dns) : "не определены", null));
             string proxy = NetCheck.SystemProxyDescription();
             r.Add(new DiagItem(G4, proxy == null ? "ok" : "warn", "Системный прокси", proxy ?? "не используется",

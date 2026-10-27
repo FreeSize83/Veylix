@@ -93,6 +93,7 @@ namespace Veylix
             s.LastResults = new ServiceResult[] { d, y };
             s.LastLatency = StrategyLab.AvgLatency(d, y);
             Remember(s, d.Score + y.Score, d.MaxScore + y.MaxScore, ShortResult(d, y) + (s.LastLatency >= 0 ? " · " + s.LastLatency + " мс" : ""));
+            CrowdReport(s, d, y);
             RefreshLab();
         }
 

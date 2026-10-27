@@ -142,6 +142,7 @@ namespace Veylix
                 if (++ticks % 15 == 0) RefreshMap();
                 if (ticks % 2 == 0) CheckGames();
                 if (ticks % 30 == 0) CheckThemeSchedule();
+                if (ticks % 1800 == 0) LoadCrowd(true);
             };
             timer.Start();
 
@@ -407,6 +408,7 @@ namespace Veylix
 
                 if (autoMode && !DeferStartForGame(selected)) await AutoStartBypass();
                 if (cfg.WidgetOn && !selfTest) ShowWidget();
+                LoadCrowd(false);   // сигнал о массовом сбое у провайдера — и при запуске в трее
                 if (engine.CheckUpdatesEnabled) await CheckUpdates(false);
                 if (cfg.AppUpdateCheck && Program.PostUpdatePlan == null) CheckAppUpdate(false);
             }
@@ -815,6 +817,15 @@ namespace Veylix
                 if (first != null) order.Add(first);
                 Strategy prefS = strategies.Find(delegate(Strategy x) { return x.Display == cfg.PreferredStrategy; });
                 if (prefS != null && !order.Contains(prefS)) order.Add(prefS);
+                // затем то, что сейчас работает у других пользователей этого провайдера (народная карта)
+                List<string> fromCrowd = new List<string>();
+                foreach (string n in CrowdMap.Recommended(crowd, 5))
+                {
+                    Strategy cs = strategies.Find(delegate(Strategy x) { return x.Display == n; });
+                    if (cs != null && !order.Contains(cs)) { order.Add(cs); fromCrowd.Add(n); }
+                }
+                if (fromCrowd.Count > 0)
+                    log.Add("info", "Автоподбор: сначала проверяю стратегии, которые работают у других пользователей " + crowd.Where + ": " + string.Join(", ", fromCrowd.ToArray()) + ".");
                 foreach (Strategy s in strategies) if (!s.Warn && !order.Contains(s)) order.Add(s);
                 foreach (Strategy s in strategies) if (s.Warn && !order.Contains(s)) order.Add(s);
 
@@ -1268,6 +1279,14 @@ namespace Veylix
             ShowChecks(new ServiceResult[] { a, b, c });
             strategies[3].LastScore = 12; strategies[3].LastMax = 12; strategies[3].LastSummary = "Discord 3/3 · YouTube 3/3";
             strategies[4].LastScore = 7; strategies[4].LastMax = 12; strategies[4].LastSummary = "Discord 3/3 · YouTube 1/3";
+            crowd = CrowdMap.Parse("{\"ok\":true,\"asn\":12389,\"isp\":\"Rostelecom\",\"region\":\"Samara Oblast\",\"scope\":\"region\",\"window\":72," +
+                "\"strategies\":[{\"name\":\"ALT11\",\"n\":42,\"both\":36,\"discord\":39,\"youtube\":38,\"score\":0.72,\"hoursAgo\":0}," +
+                "{\"name\":\"ALT3\",\"n\":27,\"both\":19,\"discord\":25,\"youtube\":20,\"score\":0.52,\"hoursAgo\":1}," +
+                "{\"name\":\"general\",\"n\":31,\"both\":9,\"discord\":12,\"youtube\":26,\"score\":0.15,\"hoursAgo\":0}," +
+                "{\"name\":\"ALT7\",\"n\":6,\"both\":4,\"discord\":5,\"youtube\":4,\"score\":0.3,\"hoursAgo\":5}]," +
+                "\"recent\":{\"n\":14,\"both\":3,\"discord\":4,\"youtube\":12},\"earlier\":{\"n\":92,\"both\":65,\"discord\":80,\"youtube\":74}}");
+            crowd.Fetched = new DateTime(2026, 10, 27, 14, 5, 0);
+            RenderCrowd();
             strategies[5].LastScore = 0; strategies[5].LastMax = 12; strategies[5].LastSummary = "Discord 0/3 · YouTube 0/3";
             RefreshStrategyCards();
 

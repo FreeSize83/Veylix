@@ -58,6 +58,7 @@ namespace Veylix.Tests
                 Run("Что нового после обновления", TestWhatsNew);
                 Run("Обратная связь", TestFeedback);
                 Run("Значок трея и мини-виджет", TestTrayAndWidget);
+                Run("Народная карта стратегий", TestCrowdMap);
                 Run("DNS через HTTPS и резервная копия DNS", TestDoh);
                 Run("Вердикты сетевых проверок", TestVerdicts);
                 Run("Диагностика", TestDiagnostics);
@@ -381,6 +382,91 @@ namespace Veylix.Tests
             Check(!s.Contains("feed"), "IPv6 замаскирован");
             Check(LogStore.Redact("Bearer abcdefghijklmnop").Contains("***"), "Bearer-токен скрыт");
             Check(LogStore.Sanitize("Flowseal 1.10.3 · ALT3").Contains("1.10.3"), "номер версии не портится");
+        }
+
+        static string CrowdJson(int rn, int rb, int rd, int ry, int en, int eb, int ed, int ey)
+        {
+            return "{\"ok\":true,\"asn\":12389,\"isp\":\"Rostelecom\",\"region\":\"Samara Oblast\",\"scope\":\"region\",\"window\":72," +
+                "\"strategies\":[{\"name\":\"ALT11\",\"n\":42,\"both\":36,\"discord\":39,\"youtube\":38,\"score\":0.72,\"hoursAgo\":0}," +
+                "{\"name\":\"ALT3\",\"n\":4,\"both\":4,\"discord\":4,\"youtube\":4,\"score\":0.51,\"hoursAgo\":2}," +
+                "{\"name\":\"ALT7\",\"n\":2,\"both\":2,\"discord\":2,\"youtube\":2,\"score\":0.34,\"hoursAgo\":2}," +
+                "{\"name\":\"general\",\"n\":31,\"both\":9,\"discord\":12,\"youtube\":26,\"score\":0.15,\"hoursAgo\":0}]," +
+                "\"recent\":{\"n\":" + rn + ",\"both\":" + rb + ",\"discord\":" + rd + ",\"youtube\":" + ry + "}," +
+                "\"earlier\":{\"n\":" + en + ",\"both\":" + eb + ",\"discord\":" + ed + ",\"youtube\":" + ey + "}}";
+        }
+
+        static void TestCrowdMap()
+        {
+            Check(CrowdMap.BaseUrl == null || (CrowdMap.BaseUrl.StartsWith("https://") && !CrowdMap.BaseUrl.EndsWith("/feedback")), "адрес карты — тот же Worker без /feedback");
+
+            CrowdMap.Snapshot m = CrowdMap.Parse(CrowdJson(20, 17, 18, 18, 80, 60, 70, 65));
+            Eq(12389, m.Asn, "номер сети");
+            Eq("Rostelecom · Samara Oblast", m.Where, "провайдер и регион");
+            Eq(4, m.Strategies.Count, "все стратегии");
+            Eq(86, m.Strategies[0].Percent, "ALT11: 36 из 42 — 86%");
+            Check(Math.Abs(m.Strategies[0].Score - 0.72) < 1e-9, "оценка читается с точкой независимо от языка Windows");
+            Check(m.Find("ALT3") != null && m.Find("ALT7") == null, "стратегия с 2 отчётами не показывается");
+            Eq(20, m.Recent.N, "свежие отчёты");
+
+            List<string> rec = CrowdMap.Recommended(m, 5);
+            Eq(2, rec.Count, "рекомендуются только надёжные: ALT11 и ALT3 (general — 0.15, ALT7 — мало отчётов)");
+            Eq("ALT11", rec[0], "лучшая — первой");
+            Eq(1, CrowdMap.Recommended(m, 1).Count, "ограничение числа");
+            Eq(0, CrowdMap.Recommended(null, 5).Count, "карты нет — нет рекомендаций");
+
+            Eq(null, CrowdMap.Outage(m), "всё работает — сбоя нет");
+            string o = CrowdMap.Outage(CrowdMap.Parse(CrowdJson(14, 3, 4, 12, 92, 65, 80, 74)));
+            Check(o != null && o.Contains("Discord") && o.Contains("21%") && o.Contains("71%"), "упал Discord: " + o);
+            o = CrowdMap.Outage(CrowdMap.Parse(CrowdJson(12, 2, 11, 2, 60, 50, 55, 52)));
+            Check(o != null && o.Contains("YouTube"), "упал YouTube");
+            o = CrowdMap.Outage(CrowdMap.Parse(CrowdJson(12, 1, 2, 2, 60, 50, 55, 52)));
+            Check(o != null && o.Contains("обход"), "упало всё");
+            Eq(null, CrowdMap.Outage(CrowdMap.Parse(CrowdJson(5, 0, 0, 0, 60, 50, 55, 52))), "5 свежих отчётов — мало для вывода");
+            Eq(null, CrowdMap.Outage(CrowdMap.Parse(CrowdJson(20, 6, 8, 8, 60, 20, 30, 30))), "и раньше работало плохо — это не внезапный сбой");
+            Check(CrowdMap.Outage(CrowdMap.Parse(CrowdJson(10, 1, 2, 2, 3, 3, 3, 3))) != null, "истории нет, но почти ничего не работает");
+
+            bool threw = false;
+            try { CrowdMap.Parse("{\"ok\":false,\"error\":\"карта не настроена\"}"); } catch (InvalidDataException ex) { threw = ex.Message == "карта не настроена"; }
+            Check(threw, "ошибка сервера передаётся понятным текстом");
+            CrowdMap.Snapshot none = CrowdMap.Parse("{\"ok\":true,\"asn\":0,\"isp\":\"\",\"region\":\"\",\"scope\":\"none\",\"strategies\":[],\"recent\":{\"n\":0},\"earlier\":{\"n\":0}}");
+            Eq("ваш провайдер", none.Where, "провайдер не определён");
+
+            Dictionary<string, DateTime> sent = new Dictionary<string, DateTime>();
+            DateTime t = new DateTime(2026, 10, 27, 12, 0, 0);
+            Check(CrowdMap.CanReport(sent, "ALT11", t), "первый отчёт можно");
+            sent["ALT11"] = t;
+            Check(!CrowdMap.CanReport(sent, "ALT11", t.AddMinutes(10)), "повтор через 10 минут — нельзя");
+            Check(CrowdMap.CanReport(sent, "ALT3", t.AddMinutes(10)), "другая стратегия — можно");
+            Check(CrowdMap.CanReport(sent, "ALT11", t.AddMinutes(31)), "через полчаса — снова можно");
+
+            string p = CrowdMap.BuildReport("ALT11", true, false);
+            Dictionary<string, object> d = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<Dictionary<string, object>>(p);
+            Eq(3, d.Count, "в отчёте только три поля — ничего лишнего");
+            Check((string)d["strategy"] == "ALT11" && (bool)d["discord"] && !(bool)d["youtube"], "содержимое отчёта");
+
+            Check(VpnRoute.LooksLikeVpn("happ-xray Happ Tunnel"), "Happ (xray, TUN)");
+            Check(VpnRoute.LooksLikeVpn("Wintun Userspace Tunnel"), "Wintun");
+            Check(VpnRoute.LooksLikeVpn("WireGuard Tunnel #1"), "WireGuard");
+            Check(VpnRoute.LooksLikeVpn("sing-box tun"), "sing-box");
+            Check(VpnRoute.LooksLikeVpn("Amnezia VPN TAP"), "AmneziaVPN");
+            Check(VpnRoute.LooksLikeVpn("Cloudflare WARP Interface Tunnel"), "Cloudflare WARP");
+            Check(VpnRoute.LooksLikeVpn("TAP-Windows Adapter V9"), "OpenVPN TAP");
+            Check(VpnRoute.LooksLikeVpn("tun0"), "tun0");
+            Check(!VpnRoute.LooksLikeVpn("Ethernet Realtek Gaming GbE Family Controller"), "сетевая карта — не VPN");
+            Check(!VpnRoute.LooksLikeVpn("Беспроводная сеть Intel(R) Wi-Fi 6E AX211 160MHz"), "Wi-Fi — не VPN");
+            Check(!VpnRoute.LooksLikeVpn("Ethernet 2 Remote NDIS Compatible Device"), "USB-модем — не VPN");
+            Check(!VpnRoute.LooksLikeVpn("vEthernet (Default Switch) Hyper-V Virtual Ethernet Adapter"), "Hyper-V — не VPN");
+
+            Settings st = Settings.Load();
+            Eq(0, st.CrowdShare, "по умолчанию — не спрашивали, ничего не отправляется");
+            st.CrowdShare = 1;
+            st.Save();
+            Eq(1, Settings.Load().CrowdShare, "согласие сохраняется");
+            st.CrowdShare = 2;
+            st.Save();
+            Eq(2, Settings.Load().CrowdShare, "отказ сохраняется");
+            st.CrowdShare = 0;
+            st.Save();
         }
 
         static void TestTrayAndWidget()

@@ -56,7 +56,7 @@ namespace Veylix
         VButton powerBtn, checkBtn;
         TextBlock powerGlyph, statusText, stratText, uptimeText, checkWhen;
         Ellipse halo;
-        VToggle tgWidget;
+        VToggle tgWidget, tgCrowd;
         Card heroCard;
         Rectangle heroAura;          // мягкое свечение цвета состояния за кнопкой питания
         string auraMode = "";
@@ -456,7 +456,7 @@ namespace Veylix
             if (name == "events") RefreshEvents();
             if (name == "assistant") { Analyze(); RenderAssistant(null); }
             if (name == "pulse") { RefreshPulseHeader(); foreach (PulseSeries ps in pulseMon.All.Values) DrawPulseCard(ps); }
-            if (name == "strategies") RefreshLab();
+            if (name == "strategies") { RefreshLab(); LoadCrowd(false); }
             if (name == "sites") { RefreshSiteList(); ReloadDnsState(); }
             if (name == "diag" && !diagVisited && !selfTest)
             {
@@ -1201,7 +1201,15 @@ namespace Veylix
             sp.Children.Add(tuneExplain);
             sp.Children.Add(BuildLabPanel());
             c.Content = sp;
-            g.Children.Add(c);
+            Grid topRow = new Grid();
+            topRow.ColumnDefinitions.Add(Theme.Col(0));
+            topRow.ColumnDefinitions.Add(Theme.Col(16));
+            topRow.ColumnDefinitions.Add(Theme.Col(330));
+            topRow.Children.Add(c);
+            FrameworkElement crowdCard = BuildCrowdCard();
+            Grid.SetColumn(crowdCard, 2);
+            topRow.Children.Add(crowdCard);
+            g.Children.Add(topRow);
 
             Grid list = new Grid();
             list.RowDefinitions.Add(Theme.RowDef(-1));
@@ -1286,7 +1294,15 @@ namespace Veylix
                 bool pref = s.Display == cfg.PreferredStrategy;
                 sc.Name.Text = s.Display + (pref ? "  ★" : "");
                 string tip = System.IO.Path.GetFileName(s.BatPath) + (active ? "\nСейчас работает" : "") + (pref ? "\n★ Предпочтительная" : "");
-                if (s.LastScore < 0)
+                string crowdLevel;
+                string crowdText = CrowdBadge(s, out crowdLevel);
+                if (crowdText != null) tip += "\nНародная карта: " + crowdText;
+                if (s.LastScore < 0 && crowdText != null)
+                {
+                    sc.Result.Text = (active ? "работает · " : "") + crowdText;
+                    sc.Result.SetResourceReference(TextBlock.ForegroundProperty, Ui.FgKey(crowdLevel));
+                }
+                else if (s.LastScore < 0)
                 {
                     sc.Result.Text = active ? "работает · не проверялась" : "не проверялась";
                     sc.Result.SetResourceReference(TextBlock.ForegroundProperty, "Text3");
@@ -1647,6 +1663,12 @@ namespace Veylix
             tgTray.Clicked += delegate { ToggleCloseToTray(); };
             TextBlock d3;
             s2.Children.Add(Ui.SettingRow("Закрывать в трей", "Если обход работает, крестик прячет окно в трей вместо выхода. Значок в трее: левая кнопка — открыть окно, правая — панель трея.", tgTray, out d3));
+            tgCrowd = new VToggle();
+            tgCrowd.Clicked += delegate { SetCrowdShare(cfg.CrowdShare != 1); };
+            TextBlock d7;
+            s2.Children.Add(Ui.SettingRow("Делиться результатами с народной картой",
+                "После проверки стратегии Veylix анонимно сообщает её название и работают ли Discord и YouTube. Провайдера и регион определяет сервер по соединению; IP не сохраняется. " +
+                "Так другие пользователи вашего провайдера видят, что у них работает.", tgCrowd, out d7));
             tgWidget = new VToggle();
             tgWidget.Clicked += delegate { ToggleWidget(); };
             TextBlock d6;
@@ -1918,6 +1940,7 @@ namespace Veylix
             tgAutorun.IsEnabled = !autorunBusy;
             tgTray.IsOn = cfg.CloseToTray;
             if (tgWidget != null) tgWidget.IsOn = widget != null || (selfTest && cfg.WidgetOn);
+            if (tgCrowd != null) tgCrowd.IsOn = cfg.CrowdShare == 1;
             tgToasts.IsOn = cfg.Toasts;
             tgCheckUpd.IsOn = engine.CheckUpdatesEnabled;
         }

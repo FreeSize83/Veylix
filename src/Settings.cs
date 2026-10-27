@@ -30,6 +30,7 @@ namespace Veylix
         public string GameWatchList = "";     // exe игр и античитов через «|»
         public string SeenVersion = "";       // версия, о которой уже показали «Что нового»
         public bool WidgetOn = false;         // мини-виджет поверх окон
+        public int CrowdShare = 0;            // народная карта: 0 — не спрашивали, 1 — делиться результатами, 2 — нет
         public double WidgetX = double.NaN, WidgetY = double.NaN;   // его позиция (NaN — правый нижний угол)
         public bool LoadedFromFile;           // настройки прочитаны из файла (не первая установка)
 
@@ -128,6 +129,7 @@ namespace Veylix
                 case "GameWatchList": GameWatchList = v; break;
                 case "SeenVersion": SeenVersion = v; break;
                 case "WidgetOn": WidgetOn = v == "1"; break;
+                case "CrowdShare": CrowdShare = v == "1" ? 1 : v == "2" ? 2 : 0; break;
                 case "WidgetX": WidgetX = ParseCoord(v); break;
                 case "WidgetY": WidgetY = ParseCoord(v); break;
                 default:
@@ -173,6 +175,7 @@ namespace Veylix
             sb.Append("GameWatchList=").Append(GameWatchList).Append("\r\n");
             sb.Append("SeenVersion=").Append(SeenVersion).Append("\r\n");
             sb.Append("WidgetOn=").Append(WidgetOn ? "1" : "0").Append("\r\n");
+            sb.Append("CrowdShare=").Append(CrowdShare).Append("\r\n");
             sb.Append("WidgetX=").Append(double.IsNaN(WidgetX) ? "" : Math.Round(WidgetX).ToString(System.Globalization.CultureInfo.InvariantCulture)).Append("\r\n");
             sb.Append("WidgetY=").Append(double.IsNaN(WidgetY) ? "" : Math.Round(WidgetY).ToString(System.Globalization.CultureInfo.InvariantCulture)).Append("\r\n");
             foreach (string k in order)
