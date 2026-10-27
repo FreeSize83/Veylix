@@ -1,13 +1,8 @@
 {
-  "version": 1,
-  "updated": "2026-10-27",
+  "version": 2,
+  "updated": "2026-10-28",
   "about": "Наборы доменов для «Игры и приложения» в Veylix. Veylix скачивает этот файл раз в 12 часов; правки здесь доходят до всех пользователей без новой версии программы. Домен действует и на поддомены.",
   "presets": [
-    {
-      "id": "telegram", "title": "Telegram", "group": "apps",
-      "note": "Сайт, веб-версия, загрузка медиа. Звонки и часть медиа идут по IP-адресам — для них может понадобиться IPSet «Все адреса».",
-      "domains": ["telegram.org", "t.me", "telegram.me", "telegra.ph", "telesco.pe", "cdn-telegram.org", "telegram-cdn.org", "tdesktop.com", "graph.org", "comments.app", "contest.com", "fragment.com", "tg.dev", "usercontent.dev"]
-    },
     {
       "id": "whatsapp", "title": "WhatsApp", "group": "apps",
       "note": "Сайт, веб-версия и приложение для ПК.",

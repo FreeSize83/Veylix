@@ -407,7 +407,8 @@ namespace Veylix.Tests
                 foreach (string d in p.Domains) Check(!d.StartsWith("www."), p.Id + ": домен без www. (" + d + ")");
             }
             Eq(rawCount, parsed, "все домены из apps.json приняты");
-            Check(c.Find("roblox") != null && c.Find("telegram") != null && c.Find("steam") != null, "есть Roblox, Telegram и Steam");
+            Check(c.Find("roblox") != null && c.Find("steam") != null && c.Find("twitch") != null, "есть Roblox, Steam и Twitch");
+            Check(c.Find("telegram") == null, "Telegram убран: его ограничивают по IP, zapret тут не помогает");
             Check(c.Find("roblox").Domains.Contains("roblox.com"), "Roblox: roblox.com");
 
             AppPresets.Catalog bad = AppPresets.Parse("{\"version\":2,\"presets\":[{\"id\":\"ok\",\"title\":\"Ok\",\"group\":\"games\",\"note\":\"n\",\"domains\":[\"good.com\",\"bad domain\",\"1.2.3.4\",\"GOOD.com\"]}," +
@@ -418,10 +419,19 @@ namespace Veylix.Tests
             try { AppPresets.Parse("{\"presets\":[]}"); } catch (InvalidDataException) { threw = true; }
             Check(threw, "пустой файл не принимается — остаются прежние наборы");
 
-            List<string> sel = AppPresets.Selected("roblox|telegram||roblox|BAD id");
+            List<string> sel = AppPresets.Selected("roblox|steam||roblox|BAD id");
             Eq(2, sel.Count, "выбранные наборы: без дублей и мусора");
-            List<string> dom = AppPresets.DomainsFor(c, new string[] { "roblox", "telegram", "unknown" });
-            Check(dom.Contains("rbxcdn.com") && dom.Contains("t.me"), "домены выбранных наборов");
+            List<string> dom = AppPresets.DomainsFor(c, new string[] { "roblox", "twitch", "unknown" });
+            Check(dom.Contains("rbxcdn.com") && dom.Contains("ttvnw.net"), "домены выбранных наборов");
+
+            // набор убрали из репозитория — у тех, кто его включал, домены уходят из списка при следующем обновлении
+            AppPresets.Catalog v1 = AppPresets.Parse("{\"version\":1,\"presets\":[{\"id\":\"tg\",\"title\":\"T\",\"group\":\"apps\",\"note\":\"n\",\"domains\":[\"t.me\"]},{\"id\":\"rb\",\"title\":\"R\",\"group\":\"games\",\"note\":\"n\",\"domains\":[\"roblox.com\"]}]}");
+            AppPresets.Catalog v2 = AppPresets.Parse("{\"version\":2,\"presets\":[{\"id\":\"rb\",\"title\":\"R\",\"group\":\"games\",\"note\":\"n\",\"domains\":[\"roblox.com\"]}]}");
+            List<string> both = AppPresets.Selected("tg|rb");
+            string withTg = AppPresets.WriteBlock("mine.com" + Environment.NewLine, AppPresets.DomainsFor(v1, both));
+            string afterUpdate = AppPresets.WriteBlock(withTg, AppPresets.DomainsFor(v2, both));
+            Check(!AppPresets.ReadBlock(afterUpdate).Contains("t.me") && AppPresets.ReadBlock(afterUpdate).Contains("roblox.com") && afterUpdate.Contains("mine.com"),
+                "убранный набор снят, остальные и свои домены на месте");
             List<string> sorted = new List<string>(dom); sorted.Sort(StringComparer.Ordinal);
             Eq(string.Join("|", sorted.ToArray()), string.Join("|", dom.ToArray()), "домены отсортированы — блок не меняется без причины");
 
@@ -453,9 +463,9 @@ namespace Veylix.Tests
             finally { try { Directory.Delete(dir, true); } catch { } }
 
             Settings stt = Settings.Load();
-            stt.AppPresets = "roblox|telegram";
+            stt.AppPresets = "roblox|steam";
             stt.Save();
-            Eq("roblox|telegram", Settings.Load().AppPresets, "выбранные наборы сохраняются");
+            Eq("roblox|steam", Settings.Load().AppPresets, "выбранные наборы сохраняются");
             stt.AppPresets = "";
             stt.Save();
         }

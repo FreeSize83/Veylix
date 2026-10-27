@@ -1288,7 +1288,7 @@ namespace Veylix
                 "\"recent\":{\"n\":14,\"both\":3,\"discord\":4,\"youtube\":12},\"earlier\":{\"n\":92,\"both\":65,\"discord\":80,\"youtube\":74}}");
             crowd.Fetched = new DateTime(2026, 10, 27, 14, 5, 0);
             RenderCrowd();
-            cfg.AppPresets = "roblox|telegram|riot";
+            cfg.AppPresets = "roblox|steam|riot";
             RenderPresets();
             strategies[5].LastScore = 0; strategies[5].LastMax = 12; strategies[5].LastSummary = "Discord 0/3 · YouTube 0/3";
             RefreshStrategyCards();

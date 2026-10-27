@@ -11,7 +11,7 @@ using System.Windows.Controls;
 
 namespace Veylix
 {
-    // «Игры и приложения»: готовые наборы доменов (Roblox, Telegram, Steam…). Список лежит в репозитории
+    // «Игры и приложения»: готовые наборы доменов (Roblox, Steam, Twitch…). Список лежит в репозитории
     // (presets/apps.json) и скачивается раз в 12 часов — правки доходят до всех без новой версии Veylix.
     // Отмеченные наборы записываются отдельным блоком в list-general-user.txt; свои домены пользователя не трогаются.
     public static class AppPresets

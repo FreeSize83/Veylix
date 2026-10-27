@@ -185,7 +185,7 @@ namespace Veylix
             site.Keywords = "не открывается сайт домен добавить в обход список";
             site.Short = "Проверить сайт";
             Cmd("apps.presets", chk, 0xE7FC, "Игры и приложения: добавить в обход", null, delegate { Page("sites"); }).Keywords =
-                "roblox телеграм telegram steam лига league valorant twitch whatsapp игра приложение набор";
+                "roblox steam лига league valorant twitch whatsapp игра приложение набор";
             AppCommand dns = Cmd("dns.check", chk, 0xE72E, "Проверить DNS на подмену", null, delegate { Page("sites"); RunDnsCheck(); });
             dns.Unavailable = delegate { return dnsBusy ? "проверка DNS уже идёт" : null; };
             dns.Keywords = "днс doh https защищённый cloudflare google блокировка";
