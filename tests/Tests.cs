@@ -60,6 +60,7 @@ namespace Veylix.Tests
                 Run("Значок трея и мини-виджет", TestTrayAndWidget);
                 Run("Народная карта стратегий", TestCrowdMap);
                 Run("Игры и приложения", TestAppPresets);
+                Run("Ошибки оформления окон (DWM)", TestDwmErrors);
                 Run("DNS через HTTPS и резервная копия DNS", TestDoh);
                 Run("Вердикты сетевых проверок", TestVerdicts);
                 Run("Диагностика", TestDiagnostics);
@@ -383,6 +384,30 @@ namespace Veylix.Tests
             Check(!s.Contains("feed"), "IPv6 замаскирован");
             Check(LogStore.Redact("Bearer abcdefghijklmnop").Contains("***"), "Bearer-токен скрыт");
             Check(LogStore.Sanitize("Flowseal 1.10.3 · ALT3").Contains("1.10.3"), "номер версии не портится");
+        }
+
+        static void TestDwmErrors()
+        {
+            System.Runtime.InteropServices.COMException dwm = new System.Runtime.InteropServices.COMException("Композиция рабочего стола отключена", unchecked((int)0x80263001));
+            Check(Program.IsDwmCompositionOff(dwm), "COMException 0x80263001 — безвредная ошибка DWM");
+            Check(Program.IsDwmCompositionOff(new System.Reflection.TargetInvocationException(dwm)), "обёрнутая в другое исключение — тоже");
+            Check(!Program.IsDwmCompositionOff(new System.Runtime.InteropServices.COMException("другая", unchecked((int)0x80004005))), "другой код COM — настоящая ошибка");
+            Check(!Program.IsDwmCompositionOff(new InvalidOperationException("x")), "обычное исключение — настоящая ошибка");
+            Check(!Program.IsDwmCompositionOff(null), "null — нет");
+            HashSet<string> shown = new HashSet<string>();
+            Check(Program.ShouldShowError(shown, "Ошибка А"), "первая ошибка показывается");
+            Check(!Program.ShouldShowError(shown, "Ошибка А"), "та же — больше не показывается");
+            Check(Program.ShouldShowError(shown, "Ошибка Б"), "другая — показывается");
+
+            string t1 = DwmHint.Text("uagame.exe", false);
+            Check(t1.Contains("uagame.exe") && t1.Contains("ничего делать не нужно") && t1.Contains("нажмите, чтобы добавить"), "подсказка: игра определена — предлагаем игровой режим");
+            string t2 = DwmHint.Text("uagame.exe", true);
+            Check(t2.Contains("уже в «Игровом режиме»") && !t2.Contains("нажмите"), "игра уже в списке — не предлагаем лишнего");
+            string t3 = DwmHint.Text(null, false);
+            Check(t3.StartsWith("Полноэкранная игра") && t3.Contains("«Игровой режим» в настройках"), "игра не определена — общий совет");
+            Check(DwmHint.Text("vgc.exe", false).StartsWith("Vanguard"), "понятное имя известного античита");
+            Check(DwmHint.LooksLikeGame("uagame.exe") && DwmHint.LooksLikeGame("valorant-win64-shipping.exe"), "игры");
+            Check(!DwmHint.LooksLikeGame("explorer.exe") && !DwmHint.LooksLikeGame("veylix.exe") && !DwmHint.LooksLikeGame("DWM.EXE") && !DwmHint.LooksLikeGame(null), "системные программы и сам Veylix — не игры");
         }
 
         static void TestAppPresets()

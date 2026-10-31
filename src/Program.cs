@@ -10,11 +10,32 @@ namespace Veylix
 {
     public static class Program
     {
-        public const string Version = "2.3.10";
+        public const string Version = "2.3.11";
 
         const string MutexName = "Global\\VeylixLauncher_v2";
         const string LegacyMutexName = "Global\\BeeBotLauncher_v1";
         const string ShowEventName = "Global\\VeylixLauncher_Show";
+
+        public const int DwmCompositionDisabled = unchecked((int)0x80263001);   // DWM_E_COMPOSITIONDISABLED
+
+        // Windows на время отключила композицию рабочего стола (полноэкранная игра, античит, сброс видеодрайвера).
+        // WindowChrome в WPF в этот момент бросает COMException, хотя окно продолжает работать — это не сбой Veylix.
+        public static bool IsDwmCompositionOff(Exception ex)
+        {
+            for (Exception e = ex; e != null; e = e.InnerException)
+                if (e is System.Runtime.InteropServices.ExternalException && e.HResult == DwmCompositionDisabled) return true;
+            return false;
+        }
+
+        // Одинаковую ошибку показываем один раз за сеанс, а не окном на каждое повторение
+        static readonly System.Collections.Generic.HashSet<string> shownErrors = new System.Collections.Generic.HashSet<string>();
+        static bool dialogOpen, dwmLogged;
+        static Action dwmOff;   // главное окно: подсказка и восстановление оформления
+
+        public static bool ShouldShowError(System.Collections.Generic.HashSet<string> shown, string message)
+        {
+            return shown.Add(message ?? "");
+        }
 
         static void Crash(string where, Exception ex)
         {
@@ -91,16 +112,27 @@ namespace Veylix
             app.ShutdownMode = ShutdownMode.OnExplicitShutdown;
             app.DispatcherUnhandledException += delegate(object s, DispatcherUnhandledExceptionEventArgs e)
             {
-                Crash("ui", e.Exception);
                 e.Handled = true;
+                if (IsDwmCompositionOff(e.Exception))
+                {
+                    // безвредно: окно работает, оформление вернётся вместе с композицией — без окна поверх игры
+                    if (!dwmLogged) { dwmLogged = true; Crash("dwm", e.Exception); }
+                    if (dwmOff != null) try { dwmOff(); } catch { }
+                    return;
+                }
+                Crash("ui", e.Exception);
+                if (dialogOpen || !ShouldShowError(shownErrors, e.Exception.Message)) return;
+                dialogOpen = true;
                 try { VDialog.Fallback("Veylix — ошибка", e.Exception.Message + "\n\nПодробности записаны в crash.log в папке данных."); }
                 catch { }
+                finally { dialogOpen = false; }
             };
 
             MainWindow w;
             try
             {
                 w = new MainWindow(auto, false);
+                dwmOff = w.OnDwmCompositionOff;
             }
             catch (Exception ex)
             {

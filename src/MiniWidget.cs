@@ -121,6 +121,15 @@ namespace Veylix
             widget = w;
             RefreshWidget();
             w.Show();
+            // главное окно при запуске в трее может быть ещё не создано — следим за возвратом эффектов Windows и здесь
+            System.Windows.Interop.HwndSource ws = System.Windows.Interop.HwndSource.FromHwnd(new System.Windows.Interop.WindowInteropHelper(w).Handle);
+            if (ws != null)
+                ws.AddHook(delegate(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+                {
+                    if (msg == DwmHint.WM_DWMCOMPOSITIONCHANGED && !sourceReady)
+                        Dispatcher.BeginInvoke(new Action(delegate { if (widget != null) { CloseWidget(); ShowWidget(); } }), DispatcherPriority.Background);
+                    return IntPtr.Zero;
+                });
 
             widgetTimer = new DispatcherTimer();
             widgetTimer.Interval = TimeSpan.FromSeconds(20);

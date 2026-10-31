@@ -159,6 +159,7 @@ namespace Veylix
             {
                 sourceReady = true;
                 ApplyTheme();
+                HookDwm();
             };
             Loaded += delegate { OnFirstShow(); };
         }
