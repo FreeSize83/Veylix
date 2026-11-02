@@ -26,6 +26,7 @@ namespace Veylix
         {
             public string Id, Title, Group, Note;
             public List<string> Domains = new List<string>();
+            public List<string> Games = new List<string>();   // для исключений: exe игры — для паузы обхода во время игры
         }
 
         public class Catalog
@@ -33,10 +34,19 @@ namespace Veylix
             public int Version;
             public string Updated = "";
             public List<Preset> Presets = new List<Preset>();
+            // Игры, которые ломаются от обхода: их домены пишутся в исключения (list-exclude-user.txt).
+            // Отдельный ключ «exclusions», чтобы старые версии Veylix не приняли их за наборы обхода.
+            public List<Preset> Exclusions = new List<Preset>();
 
             public Preset Find(string id)
             {
                 foreach (Preset p in Presets) if (p.Id == id) return p;
+                return null;
+            }
+
+            public Preset FindExclusion(string id)
+            {
+                foreach (Preset p in Exclusions) if (p.Id == id) return p;
                 return null;
             }
         }
@@ -74,25 +84,42 @@ namespace Veylix
             if (!d.TryGetValue("presets", out v) || !(v is System.Collections.IEnumerable)) throw new InvalidDataException("в файле нет наборов");
             foreach (object o in (System.Collections.IEnumerable)v)
             {
-                Dictionary<string, object> p = o as Dictionary<string, object>;
-                if (p == null) continue;
-                Preset pr = new Preset();
-                pr.Id = Str(p, "id");
-                pr.Title = Str(p, "title").Trim();
-                pr.Group = Str(p, "group");
-                pr.Note = Str(p, "note").Trim();
-                if (!IdRe.IsMatch(pr.Id) || pr.Title.Length == 0 || c.Find(pr.Id) != null) continue;
-                object dl;
-                if (p.TryGetValue("domains", out dl) && dl is System.Collections.IEnumerable)
-                    foreach (object x in (System.Collections.IEnumerable)dl)
-                    {
-                        string h = SiteCheck.NormalizeHost(Convert.ToString(x));
-                        if (h != null && !pr.Domains.Contains(h)) pr.Domains.Add(h);
-                    }
-                if (pr.Domains.Count > 0) c.Presets.Add(pr);
+                Preset pr = ParsePreset(o as Dictionary<string, object>);
+                if (pr != null && c.Find(pr.Id) == null) c.Presets.Add(pr);
             }
             if (c.Presets.Count == 0) throw new InvalidDataException("в файле нет ни одного верного набора");
+            if (d.TryGetValue("exclusions", out v) && v is System.Collections.IEnumerable)
+                foreach (object o in (System.Collections.IEnumerable)v)
+                {
+                    Preset pr = ParsePreset(o as Dictionary<string, object>);
+                    if (pr != null && c.FindExclusion(pr.Id) == null) c.Exclusions.Add(pr);
+                }
             return c;
+        }
+
+        static Preset ParsePreset(Dictionary<string, object> p)
+        {
+            if (p == null) return null;
+            Preset pr = new Preset();
+            pr.Id = Str(p, "id");
+            pr.Title = Str(p, "title").Trim();
+            pr.Group = Str(p, "group");
+            pr.Note = Str(p, "note").Trim();
+            if (!IdRe.IsMatch(pr.Id) || pr.Title.Length == 0) return null;
+            object dl;
+            if (p.TryGetValue("domains", out dl) && dl is System.Collections.IEnumerable)
+                foreach (object x in (System.Collections.IEnumerable)dl)
+                {
+                    string h = SiteCheck.NormalizeHost(Convert.ToString(x));
+                    if (h != null && !pr.Domains.Contains(h)) pr.Domains.Add(h);
+                }
+            if (p.TryGetValue("games", out dl) && dl is System.Collections.IEnumerable)
+                foreach (object x in (System.Collections.IEnumerable)dl)
+                {
+                    string g = GameWatch.Normalize(Convert.ToString(x));
+                    if (g != null && !pr.Games.Contains(g)) pr.Games.Add(g);
+                }
+            return pr.Domains.Count > 0 || pr.Games.Count > 0 ? pr : null;
         }
 
         public static Catalog Embedded()
@@ -150,6 +177,19 @@ namespace Veylix
             foreach (string id in ids)
             {
                 Preset p = c.Find(id);
+                if (p == null) continue;
+                foreach (string d in p.Domains) if (!r.Contains(d)) r.Add(d);
+            }
+            r.Sort(StringComparer.Ordinal);
+            return r;
+        }
+
+        public static List<string> ExclusionDomainsFor(Catalog c, IList<string> ids)
+        {
+            List<string> r = new List<string>();
+            foreach (string id in ids)
+            {
+                Preset p = c.FindExclusion(id);
                 if (p == null) continue;
                 foreach (string d in p.Domains) if (!r.Contains(d)) r.Add(d);
             }
@@ -263,12 +303,96 @@ namespace Veylix
                 }
                 presetsHost.Children.Add(row);
             }
+            if (presets.Exclusions.Count > 0)
+            {
+                TextBlock et = Theme.T("Если игра не подключается с включённым обходом", 12, "Text2", true);
+                et.Margin = new Thickness(0, 10, 0, 6);
+                presetsHost.Children.Add(et);
+                List<string> exSel = AppPresets.Selected(cfg.AppExclusions);
+                foreach (AppPresets.Preset ex in presets.Exclusions) presetsHost.Children.Add(ExclusionRow(ex, exSel.Contains(ex.Id)));
+            }
             int n = AppPresets.DomainsFor(presets, sel).Count;
             DateTime upd;
             string when = DateTime.TryParseExact(presets.Updated, "yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out upd)
                 ? upd.ToString("dd.MM.yyyy") : "—";
             presetsStatus.Text = (sel.Count > 0 ? "В обходе: " + Plural(sel.Count, "набор", "набора", "наборов") + ", " + Plural(n, "домен", "домена", "доменов") + ". " : "") +
                 "Наборы от " + when + ". Не нашли свою игру? Кнопка «Написать нам» на главной — добавим.";
+        }
+
+        FrameworkElement ExclusionRow(AppPresets.Preset p, bool on)
+        {
+            Border box = new Border();
+            box.CornerRadius = new CornerRadius(12);
+            box.BorderThickness = new Thickness(1);
+            box.Padding = new Thickness(14, 10, 12, 10);
+            box.Margin = new Thickness(0, 0, 0, 8);
+            box.SetResourceReference(Border.BackgroundProperty, "Surface2");
+            box.SetResourceReference(Border.BorderBrushProperty, "Stroke");
+            StackPanel sp = new StackPanel();
+            sp.Children.Add(Theme.T(p.Title, 13, "Text", true));
+            TextBlock note = Theme.Wrap(p.Note, 11.5, "Text2");
+            note.Margin = new Thickness(0, 3, 0, 8);
+            sp.Children.Add(note);
+            WrapPanel act = new WrapPanel();
+            if (p.Domains.Count > 0)
+            {
+                VButton b = new VButton(on ? "AccentSoft" : "Surface", on ? "Accent" : "Stroke", 10);
+                b.Height = 30;
+                b.Margin = new Thickness(0, 0, 8, 0);
+                StackPanel bs = Theme.Row();
+                bs.Margin = new Thickness(10, 0, 12, 0);
+                bs.VerticalAlignment = VerticalAlignment.Center;
+                TextBlock ic = Theme.Icon(on ? 0xE73E : 0xE711, 10.5, on ? "Accent" : "Text2");
+                ic.Margin = new Thickness(0, 1, 7, 0);
+                bs.Children.Add(ic);
+                bs.Children.Add(Theme.T(on ? "Исключена из обхода" : "Исключить из обхода", 12, on ? "Accent" : "Text", true));
+                b.Content = bs;
+                b.ToolTip = "Домены: " + string.Join(", ", p.Domains.ToArray()) + (on ? "\nНажмите, чтобы вернуть игру в обход." : "");
+                b.Click += delegate { ToggleExclusion(p.Id); };
+                act.Children.Add(b);
+            }
+            if (p.Games.Count > 0)
+            {
+                bool paused = cfg.GameWatch && p.Games.TrueForAll(delegate(string g) { return GameList.Contains(g); });
+                VButton g2 = new VButton(paused ? "AccentSoft" : "Surface", paused ? "Accent" : "Stroke", 10);
+                g2.Height = 30;
+                StackPanel gs = Theme.Row();
+                gs.Margin = new Thickness(10, 0, 12, 0);
+                gs.VerticalAlignment = VerticalAlignment.Center;
+                TextBlock gi = Theme.Icon(paused ? 0xE73E : 0xE7FC, 10.5, paused ? "Accent" : "Text2");
+                gi.Margin = new Thickness(0, 1, 7, 0);
+                gs.Children.Add(gi);
+                gs.Children.Add(Theme.T(paused ? "Пауза во время игры включена" : "Пауза обхода во время игры", 12, paused ? "Accent" : "Text", true));
+                g2.Content = gs;
+                g2.ToolTip = "Игровой режим: пока запущена " + string.Join(" или ", p.Games.ToArray()) + ", обход стоит на паузе (Discord и YouTube без обхода), после игры включается сам." +
+                    (paused ? "\nНажмите, чтобы убрать игру из игрового режима." : "");
+                g2.Click += delegate
+                {
+                    if (paused) RemoveGames(p.Games);
+                    else
+                    {
+                        AddGames(p.Games);
+                        if (!cfg.GameWatch) { cfg.GameWatch = true; SaveSettings(); log.Add("info", "Игровой режим включён."); RefreshGameModeCard(); CheckGames(); }
+                    }
+                    RenderPresets();
+                };
+                act.Children.Add(g2);
+            }
+            sp.Children.Add(act);
+            box.Child = sp;
+            return box;
+        }
+
+        void ToggleExclusion(string id)
+        {
+            List<string> sel = AppPresets.Selected(cfg.AppExclusions);
+            if (sel.Contains(id)) sel.Remove(id); else sel.Add(id);
+            cfg.AppExclusions = string.Join("|", sel.ToArray());
+            SaveSettings();
+            AppPresets.Preset p = presets != null ? presets.FindExclusion(id) : null;
+            log.Add("info", (sel.Contains(id) ? "Исключено из обхода: «" : "Возвращено в обход: «") + (p != null ? p.Title : id) + "».");
+            ApplyPresets(true);
+            RenderPresets();
         }
 
         static string Plural(int n, string one, string few, string many)
@@ -296,18 +420,25 @@ namespace Veylix
             try
             {
                 engine.EnsureUserLists();
-                string path = Path.Combine(engine.Lists, SiteCheck.UserListFile);
-                string text = File.Exists(path) ? File.ReadAllText(path) : "";
-                List<string> want = AppPresets.DomainsFor(presets, AppPresets.Selected(cfg.AppPresets));
-                List<string> have = AppPresets.ReadBlock(text);
-                have.Sort(StringComparer.Ordinal);
-                if (string.Join("|", have.ToArray()) == string.Join("|", want.ToArray())) return;
-                File.WriteAllText(path, AppPresets.WriteBlock(text, want));
+                bool a = SyncBlock(Path.Combine(engine.Lists, SiteCheck.UserListFile), AppPresets.DomainsFor(presets, AppPresets.Selected(cfg.AppPresets)));
+                bool b = SyncBlock(Path.Combine(engine.Lists, SiteCheck.ExcludeFiles[0]), AppPresets.ExclusionDomainsFor(presets, AppPresets.Selected(cfg.AppExclusions)));
+                if (!a && !b) return;
                 RefreshSiteList();
                 if (engine.IsRunning && !busy && !tuning && !updating) await RestartIfRunning();
                 else if (userAction && !engine.IsRunning) log.Add("info", "Домены записаны в список — они заработают, когда вы включите обход.");
             }
             catch (Exception ex) { log.Add("err", "Игры и приложения: не удалось обновить список — " + ex.Message); }
+        }
+
+        // true — блок в файле изменён
+        static bool SyncBlock(string path, List<string> want)
+        {
+            string text = File.Exists(path) ? File.ReadAllText(path) : "";
+            List<string> have = AppPresets.ReadBlock(text);
+            have.Sort(StringComparer.Ordinal);
+            if (string.Join("|", have.ToArray()) == string.Join("|", want.ToArray())) return false;
+            File.WriteAllText(path, AppPresets.WriteBlock(text, want));
+            return true;
         }
 
         // Раз в 12 часов (и при запуске) — свежие наборы из репозитория

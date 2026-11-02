@@ -197,12 +197,26 @@ namespace Veylix
 
                 ProbeResult probe = null;
                 Target t = new Target(host, "/", true);
+                t.CaptureBody = true;
                 bool sysUsable = sys.Ok && sys.HasAddress && !Doh.LooksPoisoned(sys, sec);
                 if (!sysUsable && sec.Ok && sec.HasAddress) t.FixedAddress = sec.Addresses[0];
+                string pageHost = host;
                 if (sysUsable || t.FixedAddress != null)
                 {
                     if (engine.IsRunning) await Task.Delay(300);
                     probe = await NetCheck.ProbeWithRetry(t);
+                    // как браузер: идём по переадресации (site.com → www.site.com/ru/…), до трёх раз
+                    for (int hop = 0; hop < 3 && probe.Passed && probe.HttpCode >= 300 && probe.HttpCode < 400; hop++)
+                    {
+                        string path;
+                        string next = SiteCheck.Redirect(SiteCheck.Header(probe.Headers, "Location"), pageHost, out path);
+                        if (next == null) break;
+                        Target nt = new Target(next, path, true);
+                        nt.CaptureBody = true;
+                        if (next == host && t.FixedAddress != null) nt.FixedAddress = t.FixedAddress;
+                        probe = await NetCheck.ProbeWithRetry(nt);
+                        pageHost = next;
+                    }
                 }
 
                 string inFile, exFile;
@@ -210,6 +224,19 @@ namespace Veylix
                 string excluded = SiteCheck.FindInFiles(engine.Lists, SiteCheck.ExcludeFiles, host, out exFile);
                 SiteReport r = SiteCheck.Diagnose(host, sys, sec, probe, engine.IsRunning, covered, excluded);
                 r.CoveredFile = inFile;
+                if (pageHost != host) r.FinalHost = pageHost;
+
+                // страница ответила — проверяем домены, откуда она берёт скрипты, стили и картинки
+                if (probe != null && probe.Passed)
+                {
+                    List<string> hosts = SiteCheck.ResourceHosts(probe.Body, pageHost, 15);
+                    if (hosts.Count > 0)
+                    {
+                        RenderSiteMessage("busy", "Страница отвечает · проверяю ресурсы…", "Проверяю " + hosts.Count + " доменов, с которых " + pageHost + " загружает скрипты, стили и картинки.");
+                        List<ProbeResult> res = await ProbeResources(hosts);
+                        SiteCheck.DiagnoseResources(r, res, delegate(string h) { string f; return SiteCheck.FindInFiles(engine.Lists, SiteCheck.IncludeFiles, h, out f); }, engine.IsRunning);
+                    }
+                }
                 RenderSiteReport(r, note);
                 log.Add(r.Level == "ok" ? "ok" : r.Level == "err" ? "warn" : "info", "Проверка сайта " + host + ": " + r.Title +
                     (probe != null && !probe.Passed ? " (" + probe.Stage + ": " + probe.Detail + ")" : "") + ".");
@@ -224,6 +251,22 @@ namespace Veylix
                 Ui.SetButtonText(siteCheckBtn, "Проверить");
                 siteCheckBtn.IsEnabled = true;
             }
+        }
+
+        // Лёгкая проверка каждого домена (соединение и заголовки ответа); неудачные — ещё раз, чтобы отсеять случайные сбои
+        static async Task<List<ProbeResult>> ProbeResources(List<string> hosts)
+        {
+            List<Task<ProbeResult>> first = new List<Task<ProbeResult>>();
+            foreach (string h in hosts) first.Add(NetCheck.Probe(new Target(h, "/", true), true));
+            ProbeResult[] a = await Task.WhenAll(first);
+            List<ProbeResult> r = new List<ProbeResult>(a);
+            for (int i = 0; i < r.Count; i++)
+                if (!r[i].Passed)
+                {
+                    ProbeResult b = await NetCheck.Probe(new Target(hosts[i], "/", true), true);
+                    r[i] = NetCheck.CombineAttempts(r[i], b);
+                }
+            return r;
         }
 
         Grid SiteHeadline(string level, string title, string text)
@@ -276,12 +319,30 @@ namespace Veylix
                 det.Children.Add(DetailLine("Списки обхода", r.CoveredBy + " (" + r.CoveredFile + ")", "Text2"));
             if (r.ExcludedBy != null)
                 det.Children.Add(DetailLine("Исключения", r.ExcludedBy, "Warn"));
+            if (r.FinalHost != null)
+                det.Children.Add(DetailLine("Переадресация", "→ " + r.FinalHost, "Text2"));
+            if (r.Resources.Count > 0)
+            {
+                int bad = r.Resources.FindAll(delegate(ProbeResult p) { return !p.Passed; }).Count;
+                det.Children.Add(DetailLine("Ресурсы страницы", r.Resources.Count + " доменов проверено" + (bad > 0 ? ", не загружаются: " + bad : ", все загружаются"), bad > 0 ? "Warn" : "Text2"));
+                foreach (ProbeResult p in r.Resources)
+                    if (!p.Passed) det.Children.Add(DetailLine("  " + p.Target.Host, p.Stage + ": " + p.Detail, SiteCheck.LooksLikeDpi(p) ? "Err" : "Text3"));
+            }
             siteResult.Children.Add(det);
 
             WrapPanel act = new WrapPanel();
             act.Margin = new Thickness(44, 10, 0, 4);
             string host = r.Host;
-            if (r.OfferAdd)
+            if (r.BlockedResources.Count > 0)
+            {
+                List<string> add = new List<string>(r.BlockedResources);
+                if (r.OfferAdd) add.Insert(0, SiteCheck.ListEntry(host));
+                VButton b = Ui.Button("Добавить в обход: " + string.Join(", ", add.Count > 3 ? add.GetRange(0, 3).ToArray() : add.ToArray()) + (add.Count > 3 ? " и ещё " + (add.Count - 3) : ""), 0xE710, true);
+                b.ToolTip = string.Join("\n", add.ToArray());
+                b.Click += delegate { AddSitesToBypass(host, add); };
+                act.Children.Add(Spaced(b));
+            }
+            else if (r.OfferAdd)
             {
                 VButton b = Ui.Button("Добавить " + SiteCheck.ListEntry(host) + " в обход", 0xE710, true);
                 b.Click += delegate { AddSiteToBypass(host); };
@@ -334,6 +395,34 @@ namespace Veylix
             Grid.SetColumn(v, 1);
             g.Children.Add(v);
             return g;
+        }
+
+        // Несколько доменов сразу (сайт и его заблокированные ресурсы), затем перезапуск и повторная проверка
+        async void AddSitesToBypass(string host, List<string> entries)
+        {
+            string path = Path.Combine(engine.Lists, SiteCheck.UserListFile);
+            int added = 0;
+            try
+            {
+                engine.EnsureUserLists();
+                foreach (string e in entries) if (SiteCheck.AddEntry(path, e)) added++;
+                log.Add("ok", "В " + SiteCheck.UserListFile + " добавлено доменов: " + added + " (" + string.Join(", ", entries.ToArray()) + ").");
+                RefreshSiteList();
+            }
+            catch (Exception ex)
+            {
+                log.Add("err", "Не удалось добавить домены: " + ex.Message);
+                RenderSiteMessage("err", "Не удалось добавить домены", ex.Message);
+                return;
+            }
+            if (engine.IsRunning && !busy && !tuning && !updating)
+            {
+                RenderSiteMessage("busy", "Домены добавлены в обход", "Перезапускаю обход с обновлённым списком и проверяю сайт ещё раз…");
+                await RestartIfRunning();
+                await Task.Delay(800);
+                RunSiteCheck(host, "Добавлено доменов: " + added + ", обход перезапущен. Результат повторной проверки:");
+            }
+            else RunSiteCheck(host, "Добавлено доменов: " + added + "." + (engine.IsRunning ? " Перезапустите обход, когда он освободится." : " Включите обход, чтобы они заработали."));
         }
 
         async void AddSiteToBypass(string host)

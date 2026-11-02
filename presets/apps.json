@@ -1,6 +1,6 @@
 {
-  "version": 2,
-  "updated": "2026-10-28",
+  "version": 3,
+  "updated": "2026-11-02",
   "about": "Наборы доменов для «Игры и приложения» в Veylix. Veylix скачивает этот файл раз в 12 часов; правки здесь доходят до всех пользователей без новой версии программы. Домен действует и на поддомены.",
   "presets": [
     {
@@ -77,6 +77,14 @@
       "id": "itch", "title": "itch.io", "group": "games",
       "note": "Сайт и загрузка инди-игр.",
       "domains": ["itch.io", "itch.zone"]
+    }
+  ],
+  "exclusions": [
+    {
+      "id": "abi", "title": "Arena Breakout Infinite",
+      "note": "«Ошибка соединения» в меню или при входе в рейд. Исключение убирает сайт и сервисы игры из обхода — Discord и YouTube продолжат работать. Если не поможет — включите паузу обхода во время игры.",
+      "domains": ["arenabreakoutinfinite.com"],
+      "games": ["uagame.exe", "arenabreakoutinfinite.exe"]
     }
   ]
 }

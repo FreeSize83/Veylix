@@ -6,6 +6,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Microsoft.Win32;
 
@@ -236,6 +237,9 @@ namespace Veylix
         public bool OfferStart;           // обход выключен — включить
         public bool OfferStrategy;        // домен в обходе, но стратегия не справляется
         public bool OfferDnsFix;
+        public string FinalHost;           // куда в итоге привела переадресация (или null)
+        public List<ProbeResult> Resources = new List<ProbeResult>();   // домены скриптов, стилей, картинок страницы
+        public List<string> BlockedResources = new List<string>();      // их записи для списка обхода, которых там ещё нет
     }
 
     public static class SiteCheck
@@ -371,6 +375,126 @@ namespace Veylix
             if (ParseEntries(keep).Count == 0 && !keep.Exists(delegate(string l) { return l.Trim() == Placeholder; })) keep.Add(Placeholder);
             File.WriteAllText(path, string.Join("\r\n", keep.ToArray()) + "\r\n");
             return true;
+        }
+
+        // ---- переадресация ----
+
+        public static string Header(string headers, string name)
+        {
+            foreach (string l in (headers ?? "").Split(new string[] { "\r\n" }, StringSplitOptions.None))
+            {
+                int c = l.IndexOf(':');
+                if (c > 0 && string.Equals(l.Substring(0, c).Trim(), name, StringComparison.OrdinalIgnoreCase)) return l.Substring(c + 1).Trim();
+            }
+            return null;
+        }
+
+        // Куда ведёт Location: новый домен и путь; null — переадресация не на http(s) или некорректна
+        public static string Redirect(string location, string host, out string path)
+        {
+            path = "/";
+            if (string.IsNullOrEmpty(location)) return null;
+            string l = location.Trim();
+            if (l.StartsWith("//")) l = "https:" + l;
+            if (l.StartsWith("/"))
+            {
+                path = l;
+                return host;
+            }
+            Uri u;
+            if (!Uri.TryCreate(l, UriKind.Absolute, out u) || (u.Scheme != "http" && u.Scheme != "https")) return null;
+            string h = NormalizeHost(u.Host);
+            if (h == null) return null;
+            path = string.IsNullOrEmpty(u.PathAndQuery) ? "/" : u.PathAndQuery;
+            return h;
+        }
+
+        // ---- ресурсы страницы ----
+
+        static readonly Regex[] ResourcePatterns =
+        {
+            // скрипты, картинки, фреймы, видео (но не обычные ссылки <a href> на другие сайты)
+            new Regex(@"<(?:script|img|iframe|source|video|audio|embed|track)\b[^>]*?\s(?:src|data-src|poster)\s*=\s*[""']?\s*(?:https?:)?//([a-z0-9][a-z0-9.\-]*)", RegexOptions.IgnoreCase),
+            // <link>: стили, шрифты, preconnect, preload, иконки
+            new Regex(@"<link\b[^>]*?\shref\s*=\s*[""']?\s*(?:https?:)?//([a-z0-9][a-z0-9.\-]*)", RegexOptions.IgnoreCase),
+            // srcset и url(...) в стилях
+            new Regex(@"(?:srcset\s*=\s*[""']|,\s*)(?:https?:)?//([a-z0-9][a-z0-9.\-]*)", RegexOptions.IgnoreCase),
+            new Regex(@"url\(\s*[""']?(?:https?:)?//([a-z0-9][a-z0-9.\-]*)", RegexOptions.IgnoreCase),
+        };
+
+        // Домены, с которых страница грузит ресурсы, в порядке появления; сам домен страницы не входит
+        public static List<string> ResourceHosts(string html, string pageHost, int max)
+        {
+            List<KeyValuePair<int, string>> found = new List<KeyValuePair<int, string>>();
+            if (string.IsNullOrEmpty(html)) return new List<string>();
+            foreach (Regex re in ResourcePatterns)
+                foreach (Match m in re.Matches(html))
+                    found.Add(new KeyValuePair<int, string>(m.Index, m.Groups[1].Value));
+            found.Sort(delegate(KeyValuePair<int, string> a, KeyValuePair<int, string> b) { return a.Key.CompareTo(b.Key); });
+            List<string> r = new List<string>();
+            foreach (KeyValuePair<int, string> f in found)
+            {
+                string h = NormalizeHost(f.Value);
+                if (h == null || h == pageHost || r.Contains(h)) continue;
+                r.Add(h);
+                if (r.Count >= max) break;
+            }
+            return r;
+        }
+
+        // Блокировка, которую обходит zapret (DPI): обрыв, зависание или сброс на TLS/HTTP
+        public static bool LooksLikeDpi(ProbeResult p)
+        {
+            if (p == null || p.Passed) return false;
+            return p.Status == ProbeStatus.Partial ||
+                   (p.Stage == "TLS" && (p.Status == ProbeStatus.Timeout || p.Status == ProbeStatus.Blocked)) ||
+                   (p.Stage == "HTTP" && p.Status == ProbeStatus.Blocked);
+        }
+
+        // Сайт отвечает, но часть его ресурсов заблокирована — отсюда «грузится, но чёрный экран»
+        public static void DiagnoseResources(SiteReport r, IList<ProbeResult> res, Func<string, string> coveredBy, bool bypassOn)
+        {
+            r.Resources = new List<ProbeResult>(res);
+            if (r.Level != "ok" || res.Count == 0) return;
+            List<string> dpi = new List<string>(), dns = new List<string>(), down = new List<string>();
+            foreach (ProbeResult p in res)
+            {
+                if (p.Passed) continue;
+                string h = p.Target.Host;
+                if (LooksLikeDpi(p)) dpi.Add(h);
+                else if (p.Stage == "DNS" && p.Status == ProbeStatus.Blocked) dns.Add(h);
+                else down.Add(h);
+            }
+            if (dpi.Count == 0 && dns.Count == 0)
+            {
+                if (down.Count > 0)
+                    r.Text += " Не ответили " + string.Join(", ", down.ToArray()) + " — похоже, это сбой самих серверов или блокировка по IP; на сайт это может и не влиять.";
+                return;
+            }
+            List<string> blocked = new List<string>(dpi);
+            blocked.AddRange(dns);
+            r.Level = "warn";
+            r.Title = "Сайт открывается, но не догружается";
+            string list = string.Join(", ", blocked.ToArray());
+            r.Text = "Сама страница отвечает, но " + blocked.Count + " из " + res.Count + " доменов, откуда она берёт скрипты, стили и картинки, заблокированы: " + list +
+                     ". Поэтому сайт может показывать чёрный или пустой экран. ";
+            foreach (string h in dpi)
+            {
+                string e = ListEntry(h);
+                if (coveredBy(h) == null && !r.BlockedResources.Contains(e)) r.BlockedResources.Add(e);
+            }
+            if (r.BlockedResources.Count > 0)
+                r.Text += "Добавьте их в обход — Veylix перезапустит его и проверит сайт снова.";
+            else if (dpi.Count > 0)
+            {
+                if (bypassOn) { r.OfferStrategy = true; r.Text += "Они уже в обходе, но текущая стратегия не справляется — попробуйте другую."; }
+                else { r.OfferStart = true; r.Text += "Они уже в списке обхода, но обход выключен."; }
+            }
+            if (dns.Count > 0)
+            {
+                r.OfferDnsFix = true;
+                r.Text += (dpi.Count > 0 ? " " : "") + "Адреса " + string.Join(", ", dns.ToArray()) + " скрывает DNS провайдера — поможет защищённый DNS.";
+            }
         }
 
         // Вывод по результатам: что с сайтом и что предложить

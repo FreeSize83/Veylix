@@ -126,7 +126,8 @@ namespace Veylix
         public bool Tls;
         public bool Main;    // ключевой адрес сервиса
         public string ExpectBody;   // для HTTP без TLS: ожидаемый текст ответа (иначе это заглушка/портал авторизации)
-        public IPAddress FixedAddress;   // адрес уже известен (например, из DNS через HTTPS) — этап DNS пропускается
+        public IPAddress FixedAddress;
+        public bool CaptureBody;    // прочитать и сохранить страницу целиком (до 512 КБ) — для поиска доменов ресурсов   // адрес уже известен (например, из DNS через HTTPS) — этап DNS пропускается
 
         public Target(string host, string path, bool main)
         {
@@ -154,6 +155,7 @@ namespace Veylix
         public int HttpCode;
         public long Bytes;
         public bool Flaky;             // первая попытка не прошла, повторная — прошла
+        public string Headers = "", Body = "";   // заголовки и тело ответа (тело — только при Target.CaptureBody)
 
         public bool Passed { get { return Status == ProbeStatus.Ok; } }
 
@@ -393,11 +395,13 @@ namespace Veylix
                 }
 
                 byte[] buf = new byte[16384];
+                long limit = t.CaptureBody ? 512 * 1024 : BodyLimit;
+                MemoryStream captured = t.CaptureBody ? new MemoryStream() : null;
                 StringBuilder head = new StringBuilder();
                 StringBuilder sample = new StringBuilder();
                 bool headDone = false, eof = false;
                 long total = 0;
-                while (total < BodyLimit)
+                while (total < limit)
                 {
                     Task<int> rd = stream.ReadAsync(buf, 0, buf.Length);
                     if (!await Within(rd, to).ConfigureAwait(false))
@@ -427,6 +431,7 @@ namespace Veylix
                     int n = rd.Result;
                     if (n <= 0) { eof = true; break; }
                     total += n;
+                    if (captured != null) captured.Write(buf, 0, n);
                     if (t.ExpectBody != null && sample.Length < 8192) sample.Append(Encoding.ASCII.GetString(buf, 0, n));
                     if (!headDone)
                     {
@@ -436,6 +441,7 @@ namespace Veylix
                         if (end >= 0 || hs.Length > 8192)
                         {
                             headDone = true;
+                            r.Headers = end >= 0 ? hs.Substring(0, end) : hs;
                             if (r.HttpMs < 0) r.HttpMs = (int)sw.ElapsedMilliseconds;
                             string[] first = hs.Split(new string[] { "\r\n" }, StringSplitOptions.None)[0].Split(' ');
                             int code;
@@ -445,6 +451,12 @@ namespace Veylix
                     if (headDone && light && t.ExpectBody == null) break;   // лёгкий режим: хватает заголовков ответа
                 }
                 r.Bytes = total;
+                if (captured != null)
+                {
+                    string all = Encoding.UTF8.GetString(captured.ToArray());
+                    int b = all.IndexOf("\r\n\r\n", StringComparison.Ordinal);
+                    r.Body = b >= 0 ? all.Substring(b + 4) : "";
+                }
                 if (r.HttpMs < 0) r.HttpMs = (int)sw.ElapsedMilliseconds;
                 if (r.HttpCode == 0)
                 {

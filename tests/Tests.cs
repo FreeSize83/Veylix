@@ -55,6 +55,7 @@ namespace Veylix.Tests
                 Run("Автозапуск: задание Планировщика", TestAutorun);
                 Run("Игровой режим", TestGameWatch);
                 Run("Проверка сайта", TestSiteCheck);
+                Run("Проверка сайта: ресурсы страницы", TestSiteResources);
                 Run("Что нового после обновления", TestWhatsNew);
                 Run("Обратная связь", TestFeedback);
                 Run("Значок трея и мини-виджет", TestTrayAndWidget);
@@ -487,6 +488,26 @@ namespace Veylix.Tests
             }
             finally { try { Directory.Delete(dir, true); } catch { } }
 
+            // исключения: игры, которые ломаются от обхода
+            AppPresets.Preset abi = c.FindExclusion("abi");
+            Check(abi != null && abi.Domains.Contains("arenabreakoutinfinite.com"), "Arena Breakout Infinite — в исключениях");
+            Check(abi.Games.Contains("uagame.exe") && abi.Games.Contains("arenabreakoutinfinite.exe"), "exe игры для паузы");
+            Check(c.Find("abi") == null, "исключение не попадает в наборы обхода");
+            foreach (AppPresets.Preset ex in c.Exclusions)
+                foreach (string d in ex.Domains)
+                    Eq(null, SiteCheck.FindCovering(AppPresets.DomainsFor(c, new List<string>(c.Presets.ConvertAll(delegate(AppPresets.Preset x) { return x.Id; }))), d),
+                        "домен исключения " + d + " не входит ни в один набор обхода");
+            AppPresets.Catalog e2 = AppPresets.Parse("{\"version\":3,\"presets\":[{\"id\":\"a\",\"title\":\"A\",\"group\":\"games\",\"note\":\"n\",\"domains\":[\"a.com\"]}]," +
+                "\"exclusions\":[{\"id\":\"g\",\"title\":\"G\",\"note\":\"n\",\"domains\":[\"g.com\"],\"games\":[\"C:\\\\Games\\\\UAGame.exe\",\"Launcher\",\"bad|name\"]},{\"id\":\"Bad Id\",\"title\":\"x\",\"domains\":[\"x.com\"]}]}");
+            Eq(1, e2.Exclusions.Count, "неверное исключение отброшено");
+            Eq("uagame.exe|launcher.exe", string.Join("|", e2.Exclusions[0].Games.ToArray()), "имена exe нормализуются, неверные отброшены");
+            Eq("g.com", string.Join("|", AppPresets.ExclusionDomainsFor(e2, AppPresets.Selected("g|unknown")).ToArray()), "домены выбранных исключений");
+            Eq(0, AppPresets.Parse("{\"version\":1,\"presets\":[{\"id\":\"a\",\"title\":\"A\",\"domains\":[\"a.com\"]}]}").Exclusions.Count, "файл без исключений — тоже читается");
+            string exFile = AppPresets.WriteBlock("domain.example.abc" + Environment.NewLine, AppPresets.ExclusionDomainsFor(c, AppPresets.Selected("abi")));
+            Check(AppPresets.ReadBlock(exFile).Contains("arenabreakoutinfinite.com") && exFile.Contains("domain.example.abc"), "исключение пишется блоком, файл исключений не теряет своё");
+            Check(GameWatch.HasPreset(GameWatch.Parse("uagame.exe|arenabreakoutinfinite.exe"), System.Array.Find(GameWatch.Presets, delegate(GameWatch.Preset x) { return x.Title == "Arena Breakout"; })), "набор Arena Breakout в игровом режиме");
+            Eq("Arena Breakout Infinite", GameWatch.Pretty("uagame.exe"), "понятное имя игры");
+
             Settings stt = Settings.Load();
             stt.AppPresets = "roblox|steam";
             stt.Save();
@@ -693,6 +714,78 @@ namespace Veylix.Tests
             Check(st2.LoadedFromFile, "настройки прочитаны из файла");
             st2.SeenVersion = "";
             st2.Save();
+        }
+
+        static void TestSiteResources()
+        {
+            string hd = "HTTP/1.1 301 Moved Permanently\r\nServer: nginx\r\nlocation: https://www.example.com/ru/?a=1\r\nContent-Length: 0";
+            Eq("https://www.example.com/ru/?a=1", SiteCheck.Header(hd, "Location"), "заголовок без учёта регистра");
+            Eq(null, SiteCheck.Header(hd, "Set-Cookie"), "нет заголовка");
+            string path;
+            Eq("www.example.com", SiteCheck.Redirect("https://www.example.com/ru/?a=1", "example.com", out path), "переадресация на другой домен");
+            Eq("/ru/?a=1", path, "путь сохраняется");
+            Eq("example.com", SiteCheck.Redirect("/login", "example.com", out path), "относительная переадресация");
+            Eq("/login", path, "относительный путь");
+            Eq("cdn.example.com", SiteCheck.Redirect("//cdn.example.com/x", "example.com", out path), "протокол-независимая ссылка");
+            Eq(null, SiteCheck.Redirect("ftp://example.com/", "example.com", out path), "не http — не идём");
+            Eq(null, SiteCheck.Redirect("", "example.com", out path), "пусто");
+
+            string html = "<html><head><link rel=\"stylesheet\" href=\"https://static.example.com/app.css\">" +
+                "<link rel=preconnect href=//fonts.gstatic.com>" +
+                "<script src='https://cdn.jsdelivr.net/npm/x.js'></script><script src=\"/local.js\"></script>" +
+                "<style>body{background:url(\"https://img.cdnhost.net/bg.jpg\")}</style></head>" +
+                "<body><a href=\"https://twitter.com/example\">twitter</a>" +
+                "<img src=\"https://example.com/logo.png\"><img data-src=\"https://lazy.images.org/1.jpg\">" +
+                "<img srcset=\"https://a.imgcdn.com/1.jpg 1x, https://b.imgcdn.com/2.jpg 2x\">" +
+                "<iframe src=\"https://www.youtube.com/embed/x\"></iframe>" +
+                "<video poster=\"https://STATIC.example.com/p.jpg\"></video></body></html>";
+            List<string> hosts = SiteCheck.ResourceHosts(html, "example.com", 20);
+            Eq("static.example.com|fonts.gstatic.com|cdn.jsdelivr.net|img.cdnhost.net|lazy.images.org|a.imgcdn.com|b.imgcdn.com|www.youtube.com",
+                string.Join("|", hosts.ToArray()), "домены ресурсов по порядку, без самой страницы, дублей и ссылок <a>");
+            Eq(3, SiteCheck.ResourceHosts(html, "example.com", 3).Count, "ограничение числа");
+            Eq(0, SiteCheck.ResourceHosts("", "example.com", 5).Count, "пустая страница");
+            Eq(0, SiteCheck.ResourceHosts("<script src=\"/a.js\"></script><a href=\"https://other.com\">x</a>", "example.com", 5).Count, "только свои файлы и обычные ссылки — ресурсов нет");
+
+            ProbeResult ok = new ProbeResult(); ok.Status = ProbeStatus.Ok; ok.Stage = "HTTP"; ok.Target = new Target("example.com", "/", true);
+            Func<string, ProbeResult> okr = delegate(string h) { ProbeResult p = new ProbeResult(); p.Status = ProbeStatus.Ok; p.Stage = "HTTP"; p.Target = new Target(h, "/", true); return p; };
+            Func<string, ProbeStatus, string, ProbeResult> bad = delegate(string h, ProbeStatus st, string stage) { ProbeResult p = new ProbeResult(); p.Status = st; p.Stage = stage; p.Detail = "x"; p.Target = new Target(h, "/", true); return p; };
+            Check(SiteCheck.LooksLikeDpi(bad("a.com", ProbeStatus.Timeout, "TLS")) && SiteCheck.LooksLikeDpi(bad("a.com", ProbeStatus.Partial, "HTTP")), "зависание TLS и обрыв — DPI");
+            Check(!SiteCheck.LooksLikeDpi(bad("a.com", ProbeStatus.Timeout, "TCP")) && !SiteCheck.LooksLikeDpi(okr("a.com")), "таймаут TCP и успех — не DPI");
+
+            DnsAnswer real = new DnsAnswer(); real.Ok = true; real.Rcode = 0; real.Addresses.Add(IPAddress.Parse("93.184.216.34"));
+            Func<string, string> none = delegate(string h) { return null; };
+
+            SiteReport r = SiteCheck.Diagnose("example.com", real, real, ok, true, null, null);
+            SiteCheck.DiagnoseResources(r, new List<ProbeResult> { okr("cdn.a.com"), okr("img.b.com") }, none, true);
+            Eq("ok", r.Level, "все ресурсы грузятся — сайт открывается");
+
+            r = SiteCheck.Diagnose("example.com", real, real, ok, true, null, null);
+            SiteCheck.DiagnoseResources(r, new List<ProbeResult> { okr("cdn.a.com"), bad("www.static.b.com", ProbeStatus.Timeout, "TLS"), bad("video.c.net", ProbeStatus.Partial, "HTTP") }, none, true);
+            Eq("Сайт открывается, но не догружается", r.Title, "часть ресурсов под DPI — чёрный экран");
+            Eq("warn", r.Level, "уровень — предупреждение");
+            Eq("static.b.com|video.c.net", string.Join("|", r.BlockedResources.ToArray()), "предлагаем добавить заблокированные (без www.)");
+            Check(r.Text.Contains("2 из 3"), "сколько из скольких");
+
+            r = SiteCheck.Diagnose("example.com", real, real, ok, true, null, null);
+            SiteCheck.DiagnoseResources(r, new List<ProbeResult> { bad("cdn.a.com", ProbeStatus.Timeout, "TLS") }, delegate(string h) { return "a.com"; }, true);
+            Check(r.BlockedResources.Count == 0 && r.OfferStrategy, "уже в обходе — предлагаем другую стратегию");
+            r = SiteCheck.Diagnose("example.com", real, real, ok, false, null, null);
+            SiteCheck.DiagnoseResources(r, new List<ProbeResult> { bad("cdn.a.com", ProbeStatus.Timeout, "TLS") }, delegate(string h) { return "a.com"; }, false);
+            Check(r.OfferStart, "в списке, но обход выключен — включить");
+
+            r = SiteCheck.Diagnose("example.com", real, real, ok, true, null, null);
+            SiteCheck.DiagnoseResources(r, new List<ProbeResult> { bad("cdn.a.com", ProbeStatus.Blocked, "DNS") }, none, true);
+            Check(r.OfferDnsFix && r.BlockedResources.Count == 0 && r.Title.Contains("не догружается"), "DNS скрывает ресурс — защищённый DNS");
+
+            r = SiteCheck.Diagnose("example.com", real, real, ok, true, null, null);
+            SiteCheck.DiagnoseResources(r, new List<ProbeResult> { bad("ads.a.com", ProbeStatus.Timeout, "TCP") }, none, true);
+            Check(r.Level == "ok" && r.Text.Contains("ads.a.com"), "ресурс просто не отвечает — сайт работает, но упоминаем");
+
+            ProbeResult fail = bad("example.com", ProbeStatus.Timeout, "TLS");
+            r = SiteCheck.Diagnose("example.com", real, real, fail, true, null, null);
+            string before = r.Title;
+            SiteCheck.DiagnoseResources(r, new List<ProbeResult> { bad("cdn.a.com", ProbeStatus.Timeout, "TLS") }, none, true);
+            Eq(before, r.Title, "сама страница не открылась — вывод по ней не меняется");
         }
 
         static void TestSiteCheck()

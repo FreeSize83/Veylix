@@ -23,6 +23,7 @@ namespace Veylix
             new Preset("FACEIT", "клиент и античит FACEIT", "faceit.exe", "faceitservice.exe"),
             new Preset("Easy Anti-Cheat", "Fortnite, Apex Legends и др.", "easyanticheat.exe", "easyanticheat_eos.exe"),
             new Preset("BattlEye", "PUBG, Rainbow Six Siege, DayZ и др.", "beservice.exe", "beservice_x64.exe"),
+            new Preset("Arena Breakout", "Arena Breakout Infinite: «Ошибка соединения» с включённым обходом", "uagame.exe", "arenabreakoutinfinite.exe"),
         };
 
         // «C:\Games\Game.EXE» → «game.exe», «Discord» → «discord.exe»; null — не имя программы
@@ -88,6 +89,7 @@ namespace Veylix
             if (exe == null) return "";
             if (exe == "valorant-win64-shipping.exe") return "Valorant";
             if (exe == "league of legends.exe") return "League of Legends";
+            if (exe == "uagame.exe" || exe == "arenabreakoutinfinite.exe") return "Arena Breakout Infinite";
             foreach (Preset p in Presets)
                 if (Array.IndexOf(p.Names, exe) >= 0) return p.Title;
             return exe.EndsWith(".exe") ? exe.Substring(0, exe.Length - 4) : exe;
