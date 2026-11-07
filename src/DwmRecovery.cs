@@ -112,6 +112,7 @@ namespace Veylix
             try
             {
                 ApplyTheme();
+                if (flyout == null) DropFlyoutWindow();   // создастся заново с восстановленным оформлением
                 if (widget != null) { CloseWidget(); ShowWidget(); }
                 if (dwmLastOff != DateTime.MinValue && DateTime.Now - dwmLastOff < TimeSpan.FromHours(6))
                     log.Add("info", "Эффекты Windows снова включены — оформление окон Veylix восстановлено.");

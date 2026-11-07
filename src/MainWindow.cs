@@ -158,10 +158,14 @@ namespace Veylix
             SourceInitialized += delegate
             {
                 sourceReady = true;
-                ApplyTheme();
+                // тема уже применена в конструкторе: полный пересчёт ресурсов нужен, только если включается размытие
+                Palette sp = Theme.Current;
+                if (sp != null && sp.Glass && !selfTest && Backdrop.BlurUnavailableReason(cfg.GlassReduced) == null) ApplyTheme();
+                else if (sp != null) Backdrop.Apply(this, false, sp.Dark);
                 HookDwm();
             };
-            Loaded += delegate { OnFirstShow(); };
+            // сначала окно появляется, потом — стартовые проверки
+            ContentRendered += delegate { Dispatcher.BeginInvoke(new Action(OnFirstShow), DispatcherPriority.Background); };
         }
 
         // Выполнить на UI-потоке
@@ -381,13 +385,26 @@ namespace Veylix
             started = true;
             try
             {
+                if (!selfTest)
+                {
+                    // пока пользователь ничего не делает — готовим панель трея и предкомпиляцию
+                    DispatcherTimer warm = new DispatcherTimer();
+                    warm.Interval = TimeSpan.FromSeconds(autoMode ? 1 : 4);   // при открытом окне — не во время запуска
+                    warm.Tick += delegate
+                    {
+                        warm.Stop();
+                        PrewarmFlyout();
+                        NativeImages.Schedule(cfg, SaveSettings, log);
+                    };
+                    warm.Start();
+                }
                 log.Add("info", "Veylix " + Program.Version + " · Flowseal " + (engine.InstalledVersion() ?? "?") + " · файлы: " + engine.Root);
                 if (autoMode) log.Add("info", "Запуск при входе в Windows (автозапуск).");
                 if (Settings.MigrationNote != null) log.Add("info", Settings.MigrationNote);
                 HandlePostUpdate();
                 MaybeShowWhatsNew();
                 if (!Diagnostics.IsAdmin()) log.Add("err", "Нет прав администратора — winws.exe не сможет загрузить драйвер WinDivert.");
-                List<int> ext = engine.ExternalPids();
+                List<int> ext = await Task.Run(() => engine.ExternalPids());
                 if (ext.Count > 0)
                     log.Add("warn", "Уже запущен другой winws.exe (PID " + string.Join(", ", ext) + ") — из .bat или службы zapret. При запуске обхода он будет остановлен.");
                 string proxy = NetCheck.SystemProxyDescription();

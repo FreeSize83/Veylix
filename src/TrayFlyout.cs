@@ -1,19 +1,74 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Interop;
 using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 using System.Windows.Shell;
+using System.Windows.Threading;
 using WF = System.Windows.Forms;
 
 namespace Veylix
 {
     // Панель трея в стиле быстрых настроек Windows 11: плитки действий, состояние обхода и сервисов.
     // Открывается кликом по значку в трее (левым или правым) и закрывается, когда теряет фокус.
+    // Когда панель трея закрывать при потере фокуса
+    public static class FlyoutFocus
+    {
+        public const double GraceMs = 450;      // сразу после открытия фокус может забрать панель задач
+        public const double RepeatClickMs = 500;
+
+        public static bool IgnoreRepeatClick(double msSinceOpen) { return msSinceOpen < RepeatClickMs; }
+
+        public static bool ShouldClose(double msSinceOpen, bool isForeground, bool noForegroundWindow)
+        {
+            if (msSinceOpen < GraceMs) return false;
+            return !isForeground && !noForegroundWindow;   // в момент переключения окон активного окна может не быть вовсе
+        }
+    }
+
+    static class NativeFocus
+    {
+        [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
+        [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr h);
+        [DllImport("user32.dll")] static extern int GetWindowThreadProcessId(IntPtr h, IntPtr pid);
+        [DllImport("user32.dll")] static extern bool AttachThreadInput(int from, int to, bool attach);
+        [DllImport("kernel32.dll")] static extern int GetCurrentThreadId();
+
+        public static bool IsForeground(Window w, out bool none)
+        {
+            IntPtr fg = GetForegroundWindow();
+            none = fg == IntPtr.Zero;
+            return fg == new WindowInteropHelper(w).Handle;
+        }
+
+        // Значок трея принадлежит Проводнику: обычного Activate бывает мало, Windows может не отдать фокус
+        public static void Bring(Window w)
+        {
+            try
+            {
+                w.Activate();
+                IntPtr h = new WindowInteropHelper(w).Handle;
+                if (h == IntPtr.Zero || GetForegroundWindow() == h) return;
+                int me = GetCurrentThreadId(), other = GetWindowThreadProcessId(GetForegroundWindow(), IntPtr.Zero);
+                bool attached = other != 0 && other != me && AttachThreadInput(me, other, true);
+                try
+                {
+                    BringWindowToTop(h);
+                    SetForegroundWindow(h);
+                }
+                finally { if (attached) AttachThreadInput(me, other, false); }
+            }
+            catch { }
+        }
+    }
+
     public partial class MainWindow
     {
         Window flyout;
@@ -24,18 +79,68 @@ namespace Veylix
 
         const double FlyoutW = 372;
 
+        Window flyoutWin;                // окно панели живёт всё время работы: показать готовое быстрее, чем создать заново
+        Border flyoutFrame;
+        bool flyoutBlur;
+        DateTime flyoutOpenedAt;
+        DispatcherTimer flyoutWatch;
+
         void ToggleFlyout()
         {
-            // клик по значку при открытой панели: она уже закрылась по потере фокуса — не открываем снова
-            if (flyout != null) { CloseFlyout(); return; }
-            if ((DateTime.Now - flyoutClosedAt).TotalMilliseconds < 300) return;
+            double sinceOpen = (DateTime.Now - flyoutOpenedAt).TotalMilliseconds;
+            double sinceClose = (DateTime.Now - flyoutClosedAt).TotalMilliseconds;
+            if (flyout != null)
+            {
+                if (!FlyoutFocus.IgnoreRepeatClick(sinceOpen)) CloseFlyout();   // второй клик сразу после первого — не закрываем
+                return;
+            }
+            if (sinceClose < 300) return;   // клик по значку при открытой панели: она уже закрылась по потере фокуса
             ShowFlyout();
         }
 
-        void ShowFlyout()
+        // Первое окно процесса создаётся долго (рендер, шрифты), поэтому готовим панель заранее и незаметно
+        void PrewarmFlyout()
         {
+            if (flyoutWin != null || flyout != null || selfTest) return;
+            try
+            {
+                Window w = EnsureFlyoutWindow();
+                flyoutView = "main";
+                flyoutFrame.Child = BuildFlyoutContent();
+                BuildFlyoutList("strategy");   // списки выбора тоже компилируются заранее
+                w.Left = -32000;
+                w.Top = -32000;
+                w.Opacity = 0;
+                EventHandler done = null;
+                done = delegate
+                {
+                    w.ContentRendered -= done;
+                    if (flyout == null) w.Hide();
+                };
+                w.ContentRendered += done;
+                w.Show();
+
+                // прогоняем путь открытия вхолостую, чтобы первый настоящий клик уже не ждал компиляции
+                PlaceFlyout(w);
+                w.Left = -32000;
+                w.Top = -32000;
+                bool none;
+                NativeFocus.IsForeground(w, out none);
+                StartFlyoutWatch(w);
+                AnimateFlyoutIn(w, flyoutFrame, true);
+            }
+            catch { }
+        }
+
+        Window EnsureFlyoutWindow()
+        {
+            bool blur = Backdrop.BlurUnavailableReason(cfg.GlassReduced) == null;
+            if (flyoutWin != null && flyoutBlur == blur) return flyoutWin;
+            DropFlyoutWindow();
+            flyoutBlur = blur;
             Window w = new Window();
             w.Title = "Veylix";
+            w.ShowActivated = false;   // активируем сами, когда панель уже на месте
             w.WindowStyle = WindowStyle.None;
             w.ResizeMode = ResizeMode.NoResize;
             w.ShowInTaskbar = false;
@@ -46,7 +151,6 @@ namespace Veylix
             w.UseLayoutRounding = true;
             TextOptions.SetTextFormattingMode(w, TextFormattingMode.Display);
 
-            bool blur = Backdrop.BlurUnavailableReason(cfg.GlassReduced) == null;
             WindowChrome wc = new WindowChrome();
             wc.CaptionHeight = 0;
             wc.ResizeBorderThickness = new Thickness(0);
@@ -55,18 +159,14 @@ namespace Veylix
             WindowChrome.SetWindowChrome(w, wc);
             w.SetResourceReference(Window.BackgroundProperty, "Popup");
 
-            w.SourceInitialized += delegate
+            w.SourceInitialized += delegate { ApplyFlyoutBackdrop(w); };
+            w.Deactivated += delegate
             {
-                bool dark = Theme.Current != null && Theme.Current.Dark;
-                if (Backdrop.Apply(w, blur, dark))
-                {
-                    // поверх системного размытия — полупрозрачный цвет панели из темы
-                    SolidColorBrush pb = Theme.Res("Popup") as SolidColorBrush;
-                    Color c = pb != null ? pb.Color : (dark ? Color.FromRgb(32, 32, 36) : Color.FromRgb(248, 248, 250));
-                    w.Background = new SolidColorBrush(Color.FromArgb(dark ? (byte)0xB8 : (byte)0xC8, c.R, c.G, c.B));
-                }
+                if (flyout == null) return;
+                // сразу после открытия фокус забирает панель задач или список скрытых значков — это не уход пользователя
+                if (FlyoutFocus.ShouldClose((DateTime.Now - flyoutOpenedAt).TotalMilliseconds, false, false)) CloseFlyout();
+                else Dispatcher.BeginInvoke(new Action(delegate { if (flyout != null) NativeFocus.Bring(flyout); }), DispatcherPriority.Input);
             };
-            w.Deactivated += delegate { CloseFlyout(); };
             w.PreviewKeyDown += delegate(object s, KeyEventArgs e)
             {
                 if (e.Key != Key.Escape) return;
@@ -78,25 +178,65 @@ namespace Veylix
             Border frame = new Border();
             frame.BorderThickness = new Thickness(1);
             frame.SetResourceReference(Border.BorderBrushProperty, "StrokeStrong");
+            w.Content = frame;
+            flyoutFrame = frame;
+            flyoutWin = w;
+            return w;
+        }
+
+        void ApplyFlyoutBackdrop(Window w)
+        {
+            bool dark = Theme.Current != null && Theme.Current.Dark;
+            if (Backdrop.Apply(w, flyoutBlur, dark))
+            {
+                // поверх системного размытия — полупрозрачный цвет панели из темы
+                SolidColorBrush pb = Theme.Res("Popup") as SolidColorBrush;
+                Color c = pb != null ? pb.Color : (dark ? Color.FromRgb(32, 32, 36) : Color.FromRgb(248, 248, 250));
+                w.Background = new SolidColorBrush(Color.FromArgb(dark ? (byte)0xB8 : (byte)0xC8, c.R, c.G, c.B));
+            }
+            else w.SetResourceReference(Window.BackgroundProperty, "Popup");
+        }
+
+        void DropFlyoutWindow()
+        {
+            Window old = flyoutWin;
+            flyout = null;
+            flyoutWin = null;
+            flyoutFrame = null;
+            if (old != null) try { old.Close(); } catch { }
+        }
+
+        void ShowFlyout()
+        {
+            Window w = EnsureFlyoutWindow();
+            Border frame = flyoutFrame;
+            ApplyFlyoutBackdrop(w);   // тема могла смениться, пока панель была скрыта
             flyoutView = "main";
             frame.Child = BuildFlyoutContent();
-            w.Content = frame;
 
             flyout = w;
+            flyoutOpenedAt = DateTime.Now;
+            w.BeginAnimation(UIElement.OpacityProperty, null);
             w.Opacity = 0;
             w.Show();
             PlaceFlyout(w);
-            w.Activate();
+            NativeFocus.Bring(w);
+            StartFlyoutWatch(w);
 
-            // появление как у панелей Windows: лёгкий сдвиг снизу и проявление
-            if (Theme.Animations)
+            AnimateFlyoutIn(w, frame, false);
+        }
+
+        // Появление как у панелей Windows: лёгкий сдвиг снизу и проявление. dryRun — прогрев: окно остаётся прозрачным
+        void AnimateFlyoutIn(Window w, Border frame, bool dryRun)
+        {
+            if (Theme.Animations || dryRun)
             {
                 TranslateTransform tt = new TranslateTransform(0, 14);
                 frame.RenderTransform = tt;
                 DoubleAnimation slide = new DoubleAnimation(14, 0, new Duration(TimeSpan.FromMilliseconds(220)));
                 slide.EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut };
                 tt.BeginAnimation(TranslateTransform.YProperty, slide);
-                w.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, 1, new Duration(TimeSpan.FromMilliseconds(160))));
+                w.BeginAnimation(UIElement.OpacityProperty, new DoubleAnimation(0, dryRun ? 0 : 1, new Duration(TimeSpan.FromMilliseconds(160))));
             }
             else w.Opacity = 1;
         }
@@ -107,7 +247,25 @@ namespace Veylix
             if (w == null) return;
             flyout = null;
             flyoutClosedAt = DateTime.Now;
-            try { w.Close(); } catch { }
+            if (flyoutWatch != null) flyoutWatch.Stop();
+            try { w.Hide(); } catch { }
+        }
+
+        // Закрытие при уходе фокуса: Deactivated не придёт, если Windows так и не отдала панели фокус
+        void StartFlyoutWatch(Window w)
+        {
+            if (flyoutWatch == null)
+            {
+                flyoutWatch = new DispatcherTimer();
+                flyoutWatch.Interval = TimeSpan.FromMilliseconds(200);
+                flyoutWatch.Tick += delegate
+                {
+                    if (flyout == null) { flyoutWatch.Stop(); return; }
+                    bool none, ours = NativeFocus.IsForeground(flyout, out none);
+                    if (FlyoutFocus.ShouldClose((DateTime.Now - flyoutOpenedAt).TotalMilliseconds, ours, none)) CloseFlyout();
+                };
+            }
+            flyoutWatch.Start();
         }
 
         // Угол экрана у значка трея: панель задач может быть снизу, сверху или сбоку

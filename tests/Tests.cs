@@ -59,6 +59,7 @@ namespace Veylix.Tests
                 Run("Что нового после обновления", TestWhatsNew);
                 Run("Обратная связь", TestFeedback);
                 Run("Значок трея и мини-виджет", TestTrayAndWidget);
+                Run("Панель трея и предкомпиляция", TestStartupOptimizations);
                 Run("Народная карта стратегий", TestCrowdMap);
                 Run("Игры и приложения", TestAppPresets);
                 Run("Ошибки оформления окон (DWM)", TestDwmErrors);
@@ -598,6 +599,31 @@ namespace Veylix.Tests
             st.Save();
             Eq(2, Settings.Load().CrowdShare, "отказ сохраняется");
             st.CrowdShare = 0;
+            st.Save();
+        }
+
+        static void TestStartupOptimizations()
+        {
+            Check(!FlyoutFocus.ShouldClose(100, false, false), "сразу после открытия потеря фокуса панель не закрывает");
+            Check(FlyoutFocus.ShouldClose(1000, false, false), "пользователь ушёл в другое окно — закрываем");
+            Check(!FlyoutFocus.ShouldClose(1000, true, false), "панель активна — не закрываем");
+            Check(!FlyoutFocus.ShouldClose(1000, false, true), "в момент переключения активного окна нет — ждём");
+            Check(FlyoutFocus.IgnoreRepeatClick(200), "второй клик сразу после первого панель не закрывает");
+            Check(!FlyoutFocus.IgnoreRepeatClick(2000), "позже клик по значку закрывает панель");
+
+            string k = NativeImages.Key("2.3.13", @"C:\Apps\Veylix.exe");
+            Eq(k, NativeImages.Key("2.3.13", @"c:\apps\veylix.EXE"), "регистр пути не важен");
+            Check(NativeImages.Needed("", k), "ещё не делали — нужно");
+            Check(!NativeImages.Needed(k, k), "уже сделано — не повторяем");
+            Check(NativeImages.Needed(NativeImages.Key("2.3.12", @"C:\Apps\Veylix.exe"), k), "новая версия — снова");
+            Check(NativeImages.Needed(NativeImages.Key("2.3.13", @"D:\Veylix.exe"), k), "другой путь — снова");
+            Check(NativeImages.NgenPath() != null, "ngen.exe есть в .NET Framework");
+
+            Settings st = Settings.Load();
+            st.NativeImageFor = k;
+            st.Save();
+            Eq(k, Settings.Load().NativeImageFor, "отметка о предкомпиляции сохраняется");
+            st.NativeImageFor = "";
             st.Save();
         }
 
